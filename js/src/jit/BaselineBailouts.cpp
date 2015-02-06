@@ -239,6 +239,20 @@ struct BaselineStackBuilder
         return true;
     }
 
+    bool maybeWritePadding(size_t alignment, size_t after, const char *info) {
+        MOZ_ASSERT(framePushed_ % sizeof(Value) == 0);
+        MOZ_ASSERT(after % sizeof(Value) == 0);
+        size_t offset = after % alignment;
+        if (offset)
+            offset = alignment - offset;
+        while (framePushed_ % alignment != offset) {
+            if (!writeValue(MagicValue(JS_ARG_POISON), info))
+                return false;
+        }
+
+        return true;
+    }
+
     Value popValue() {
         MOZ_ASSERT(bufferUsed_ >= sizeof(Value));
         MOZ_ASSERT(framePushed_ >= sizeof(Value));
@@ -506,11 +520,13 @@ HasLiveIteratorAtStackDepth(JSScript *script, jsbytecode *pc, uint32_t stackDept
 //             |    |   |    StubPtr    |
 //             |    |   +---------------+
 //             |    +---|   FramePtr    |
+//             |        +---------------+  --- The inlined frame might OSR in Ion
+//             |        |   Padding?    |  --- Thus the return address should be aligned.
 //             |        +---------------+
-//             |        |     ArgA      |
-//             |        +---------------+
-//             |        |     ...       |
-//         +--<         +---------------+
+//         +--<         |     ArgA      |
+//         |   |        +---------------+
+//         |   |        |     ...       |
+//         |   |        +---------------+
 //         |   |        |     Arg0      |
 //         |   |        +---------------+
 //         |   |        |     ThisV     |
@@ -523,13 +539,15 @@ HasLiveIteratorAtStackDepth(JSScript *script, jsbytecode *pc, uint32_t stackDept
 //                      +---------------+
 //                      |  ReturnAddr   | <-- return into ICCall_Scripted IC
 //             --       +===============+ --- IF CALLEE FORMAL ARGS > ActualArgC
+//             |        |   Padding?    |
+//             |        +---------------+
 //             |        |  UndefinedU   |
 //             |        +---------------+
 //             |        |     ...       |
 //             |        +---------------+
 //             |        |  Undefined0   |
-//             |        +---------------+
-//         +--<         |     ArgA      |
+//         +--<         +---------------+
+//         |   |        |     ArgA      |
 //         |   |        +---------------+
 //         |   |        |     ...       |
 //         |   |        +---------------+
@@ -1136,6 +1154,8 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
     // +---------------+
     // |   FramePtr    |
     // +---------------+
+    // |   Padding?    |
+    // +---------------+
     // |     ArgA      |
     // +---------------+
     // |     ...       |
@@ -1179,6 +1199,12 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
         else
             actualArgc = IsSetPropPC(pc);
 
+        // Align the stack based on the number of arguments.
+        int32_t afterFrameSize = (actualArgc + 1) * sizeof(Value) + JitFrameLayout::Size();
+        if (!builder.maybeWritePadding(JitStackAlignment, afterFrameSize, "Padding"))
+            return false;
+
+        // Push arguments.
         MOZ_ASSERT(actualArgc + 2 <= exprStackSlots);
         MOZ_ASSERT(savedCallerArgs.length() == actualArgc + 2);
         for (unsigned i = 0; i < actualArgc + 1; i++) {
@@ -1192,6 +1218,11 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
             MOZ_ASSERT(actualArgc > 0);
             actualArgc--;
         }
+
+        // Align the stack based on the number of arguments.
+        int32_t afterFrameSize = (actualArgc + 1) * sizeof(Value) + JitFrameLayout::Size();
+        if (!builder.maybeWritePadding(JitStackAlignment, afterFrameSize, "Padding"))
+            return false;
 
         MOZ_ASSERT(actualArgc + 2 <= exprStackSlots);
         for (unsigned i = 0; i < actualArgc + 1; i++) {
@@ -1243,6 +1274,7 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
     MOZ_ASSERT(baselineCallReturnAddr);
     if (!builder.writePtr(baselineCallReturnAddr, "ReturnAddr"))
         return false;
+    MOZ_ASSERT(builder.framePushed() % JitStackAlignment == 0);
 
     // If actualArgc >= fun->nargs, then we are done.  Otherwise, we need to push on
     // a reconstructed rectifier frame.
@@ -1251,6 +1283,8 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
 
     // Push a reconstructed rectifier frame.
     // +===============+
+    // |   Padding?    |
+    // +---------------+
     // |  UndefinedU   |
     // +---------------+
     // |     ...       |
@@ -1282,7 +1316,16 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
 #if defined(JS_CODEGEN_X86)
     if (!builder.writePtr(prevFramePtr, "PrevFramePtr-X86Only"))
         return false;
+    // Follow the same logic as in JitRuntime::generateArgumentsRectifier.
+    prevFramePtr = builder.virtualPointerAtStackOffset(0);
+    if (!builder.writePtr(prevFramePtr, "Padding-X86Only"))
+        return false;
 #endif
+
+    // Align the stack based on the number of arguments.
+    int32_t afterFrameSize = (calleeFun->nargs() + 1) * sizeof(Value) + RectifierFrameLayout::Size();
+    if (!builder.maybeWritePadding(JitStackAlignment, afterFrameSize, "Padding"))
+        return false;
 
     // Push undefined for missing arguments.
     for (unsigned i = 0; i < (calleeFun->nargs() - actualArgc); i++) {
@@ -1322,6 +1365,7 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
     MOZ_ASSERT(rectReturnAddr);
     if (!builder.writePtr(rectReturnAddr, "ReturnAddr"))
         return false;
+    MOZ_ASSERT(builder.framePushed() % JitStackAlignment == 0);
 
     return true;
 }
