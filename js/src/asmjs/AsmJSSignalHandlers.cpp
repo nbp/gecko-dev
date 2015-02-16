@@ -370,7 +370,7 @@ static void
 SetRegisterToCoercedUndefined(CONTEXT *context, Scalar::Type viewType, AnyRegister reg)
 {
     if (reg.isFloat()) {
-        switch (reg.fpu().code()) {
+        switch (reg.fpu().encoding()) {
           case X86Encoding::xmm0:  SetXMMRegToNaN(viewType, &XMM_sig(context, 0)); break;
           case X86Encoding::xmm1:  SetXMMRegToNaN(viewType, &XMM_sig(context, 1)); break;
           case X86Encoding::xmm2:  SetXMMRegToNaN(viewType, &XMM_sig(context, 2)); break;
@@ -553,7 +553,7 @@ SetRegisterToCoercedUndefined(mach_port_t rtThread, x86_thread_state64_t &state,
             return false;
 
         Scalar::Type viewType = heapAccess.type();
-        switch (heapAccess.loadedReg().fpu().code()) {
+        switch (heapAccess.loadedReg().fpu().encoding()) {
           case X86Encoding::xmm0:  SetXMMRegToNaN(viewType, &fstate.__fpu_xmm0); break;
           case X86Encoding::xmm1:  SetXMMRegToNaN(viewType, &fstate.__fpu_xmm1); break;
           case X86Encoding::xmm2:  SetXMMRegToNaN(viewType, &fstate.__fpu_xmm2); break;
