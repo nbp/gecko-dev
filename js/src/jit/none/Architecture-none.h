@@ -23,6 +23,10 @@ class Registers
   public:
     typedef uint8_t Code;
     typedef uint8_t Encoding;
+    union RegisterContent {
+        uintptr_t r;
+    };
+
     typedef uint8_t SetType;
 
     static uint32_t SetSize(SetType) { MOZ_CRASH(); }
@@ -54,6 +58,10 @@ class FloatRegisters
   public:
     typedef uint8_t Code;
     typedef uint8_t Encoding;
+    union RegisterContent {
+        double d;
+    };
+
     typedef uint32_t SetType;
 
     static const char *GetName(Code) { MOZ_CRASH(); }
