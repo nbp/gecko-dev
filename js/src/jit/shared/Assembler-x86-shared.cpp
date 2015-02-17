@@ -293,3 +293,35 @@ CPUInfo::SetSSEVersion()
         avxPresent = (xcr0EAX & xcr0SSEBit) && (xcr0EAX & xcr0AVXBit);
     }
 }
+
+const char *
+FloatRegister::name() const {
+    static const char *const names[] = {
+        "%xmm0.s", "%xmm1.s", "%xmm2.s", "%xmm3.s",
+        "%xmm4.s", "%xmm5.s", "%xmm6.s", "%xmm7.s",
+#ifdef JS_CODEGEN_X64
+        "%xmm8.s", "%xmm9.s", "%xmm10.s", "%xmm11.s",
+        "%xmm12.s", "%xmm13.s", "%xmm14.s", "%xmm15.s",
+#endif
+        "%xmm0.d", "%xmm1.d", "%xmm2.d", "%xmm3.d",
+        "%xmm4.d", "%xmm5.d", "%xmm6.d", "%xmm7.d",
+#ifdef JS_CODEGEN_X64
+        "%xmm8.d", "%xmm9.d", "%xmm10.d", "%xmm11.d",
+        "%xmm12.d", "%xmm13.d", "%xmm14.d", "%xmm15.d",
+#endif
+        "%xmm0.i4", "%xmm1.i4", "%xmm2.i4", "%xmm3.i4",
+        "%xmm4.i4", "%xmm5.i4", "%xmm6.i4", "%xmm7.i4",
+#ifdef JS_CODEGEN_X64
+        "%xmm8.i4", "%xmm9.i4", "%xmm10.i4", "%xmm11.i4",
+        "%xmm12.i4", "%xmm13.i4", "%xmm14.i4", "%xmm15.i4",
+#endif
+        "%xmm0.s4", "%xmm1.s4", "%xmm2.s4", "%xmm3.s4",
+        "%xmm4.s4", "%xmm5.s4", "%xmm6.s4", "%xmm7.s4"
+#ifdef JS_CODEGEN_X64
+      , "%xmm8.s4", "%xmm9.s4", "%xmm10.s4", "%xmm11.s4",
+        "%xmm12.s4", "%xmm13.s4", "%xmm14.s4", "%xmm15.s4"
+#endif
+    };
+    MOZ_ASSERT(size_t(code()) < mozilla::ArrayLength(names));
+    return names[size_t(code())];
+}
