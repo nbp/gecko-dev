@@ -123,12 +123,22 @@ class FloatRegisters {
   public:
     typedef X86Encoding::XMMRegisterID Encoding;
 
-    // Content spilled during bailouts.
-    union RegisterContent {
-        double d;
+    enum ContentType {
+        Single,
+        Double,
+        Int32x4,
+        Float32x4,
+        NUM_TYPES
     };
 
-    typedef uint32_t SetType;
+    // Content spilled during bailouts.
+    union RegisterContent {
+        float s;
+        double d;
+        int32_t i4[4];
+        float s4[4];
+    };
+
     static const char *GetName(Encoding code) {
         return X86Encoding::XMMRegName(code);
     }
@@ -143,19 +153,35 @@ class FloatRegisters {
 
     static const Encoding Invalid = X86Encoding::invalid_xmm;
 
-    static const uint32_t Total = 8;
+    static const uint32_t Total = 8 * NUM_TYPES;
     static const uint32_t TotalPhys = 8;
     static const uint32_t Allocatable = 7;
 
-    static const SetType AllMask = (1 << Total) - 1;
-    static const SetType AllDoubleMask = AllMask;
+    typedef uint32_t SetType;
+    static_assert(sizeof(SetType) * 8 >= Total,
+        "SetType should be large enough to enumerate all registers.");
+
+    // Magic values which are used to duplicate a mask of physical register for
+    // a specific type of register. A multiplication is used to copy and shift
+    // the bits of the physical register mask.
+    static const SetType spread_single_ = (SetType(1) << (uint32_t(Single) * TotalPhys));
+    static const SetType spread_double_ = (SetType(1) << (uint32_t(Double) * TotalPhys));
+    static const SetType spread_int32x4_ = SetType(1) << (uint32_t(Int32x4) * TotalPhys);
+    static const SetType spread_float32x4_ = SetType(1) << (uint32_t(Float32x4) * TotalPhys);
+    static const SetType spread_scalar_ = spread_single_ + spread_double_;
+    static const SetType spread_vector_ = spread_int32x4_ + spread_float32x4_;
+    static const SetType spread_ = spread_scalar_ + spread_vector_;
+
+    static const SetType AllPhysMask = ((1 << TotalPhys) - 1);
+    static const SetType AllMask = AllPhysMask * spread_;
+    static const SetType AllDoubleMask = AllPhysMask * spread_double_;
     static const SetType VolatileMask = AllMask;
     static const SetType NonVolatileMask = 0;
 
     static const SetType WrapperMask = VolatileMask;
 
     static const SetType NonAllocatableMask =
-        (1 << X86Encoding::xmm7);     // This is ScratchDoubleReg.
+        spread_ * (1 << X86Encoding::xmm7);     // This is ScratchDoubleReg.
 
     static const SetType AllocatableMask = AllMask & ~NonAllocatableMask;
 };
@@ -170,6 +196,10 @@ struct FloatRegister {
     typedef Codes::SetType SetType;
     static uint32_t SetSize(SetType x) {
         static_assert(sizeof(SetType) == 4, "SetType must be 32 bits");
+        // Count the number of non-aliased registers, for the moment.
+        x |= x >> (2 * Codes::TotalPhys);
+        x |= x >> Codes::TotalPhys;
+        x &= Codes::AllPhysMask;
         return mozilla::CountPopulation32(x);
     }
     static uint32_t FirstBit(SetType x) {
@@ -178,74 +208,95 @@ struct FloatRegister {
     static uint32_t LastBit(SetType x) {
         return 31 - mozilla::CountLeadingZeroes32(x);
     }
-    Code code_;
+  private:
+    Codes::Encoding reg_ : 3;
+    Codes::ContentType type_ : 2;
+    bool isInvalid_ : 1;
+
+    static const size_t regSize = 3;
+    static const size_t regMask = (1 << regSize) - 1;
+
+  public:
+    MOZ_CONSTEXPR FloatRegister()
+        : reg_(Codes::Encoding(0)), type_(Codes::Single), isInvalid_(true)
+    { }
+    MOZ_CONSTEXPR FloatRegister(uint32_t r, Codes::ContentType k)
+        : reg_(Codes::Encoding(r)), type_(k), isInvalid_(false)
+    { }
 
     static FloatRegister FromCode(uint32_t i) {
-        MOZ_ASSERT(i < FloatRegisters::Total);
-        FloatRegister r = { Code(i) };
-        return r;
+        MOZ_ASSERT(i < Codes::Total);
+        return FloatRegister(i & regMask, Codes::ContentType(i >> regSize));
     }
 
-    bool isSingle() const { return true; }
-    bool isDouble() const { return true; }
-    bool isInt32x4() const { return true; }
-    bool isFloat32x4() const { return true; }
+    bool isSingle() const { return type_ == Codes::Single; }
+    bool isDouble() const { return type_ == Codes::Double; }
+    bool isInt32x4() const { return type_ == Codes::Int32x4; }
+    bool isFloat32x4() const { return type_ == Codes::Float32x4; }
+    bool isInvalid() const { return isInvalid_; }
 
-    FloatRegister asSingle() const { return *this; }
-    FloatRegister asDouble() const { return *this; }
-    FloatRegister asInt32x4() const { return *this; }
-    FloatRegister asFloat32x4() const { return *this; }
+    FloatRegister asSingle() const { return FloatRegister(reg_, Codes::Single); }
+    FloatRegister asDouble() const { return FloatRegister(reg_, Codes::Double); }
+    FloatRegister asInt32x4() const { return FloatRegister(reg_, Codes::Int32x4); }
+    FloatRegister asFloat32x4() const { return FloatRegister(reg_, Codes::Float32x4); }
+
+    uint32_t size() const {
+        if (isSingle())
+            return sizeof(float);
+        if (isDouble())
+            return sizeof(double);
+        MOZ_ASSERT(isInt32x4() || isFloat32x4());
+        return 4 * sizeof(int32_t);
+    }
 
     Code code() const {
-        MOZ_ASSERT(uint32_t(code_) < FloatRegisters::Total);
-        return code_;
+        MOZ_ASSERT(uint32_t(reg_) < Codes::TotalPhys);
+        // :TODO: ARM is doing the same thing, but we should avoid this, except
+        // that the RegisterSets depends on this.
+        return Code(reg_ | (type_ << regSize));
     }
     Encoding encoding() const {
-        MOZ_ASSERT(uint32_t(code_) < FloatRegisters::Total);
-        return Encoding(code_);
+        MOZ_ASSERT(uint32_t(reg_) < Codes::Total);
+        return reg_;
     }
     const char *name() const {
+        // :TODO: Add type
         return FloatRegisters::GetName(encoding());
     }
     bool volatile_() const {
         return !!((1 << code()) & FloatRegisters::VolatileMask);
     }
     bool operator !=(FloatRegister other) const {
-        return other.code_ != code_;
+        return other.reg_ != reg_ || other.type_ != type_;
     }
     bool operator ==(FloatRegister other) const {
-        return other.code_ == code_;
+        return other.reg_ == reg_ && other.type_ == type_;
     }
     bool aliases(FloatRegister other) const {
-        return other.code_ == code_;
+        return other.reg_ == reg_;
     }
-    uint32_t numAliased() const {
-        return 1;
-    }
-    // N.B. FloatRegister is an explicit outparam here because msvc-2010
-    // miscompiled it on win64 when the value was simply returned
-    void aliased(uint32_t aliasIdx, FloatRegister *ret) {
-        MOZ_ASSERT(aliasIdx == 0);
-        *ret = *this;
-    }
-    // This function mostly exists for the ARM backend.  It is to ensure that two
-    // floating point registers' types are equivalent.  e.g. S0 is not equivalent
-    // to D16, since S0 holds a float32, and D16 holds a Double.
-    // Since all floating point registers on x86 and x64 are equivalent, it is
-    // reasonable for this function to do the same.
+    // It is to ensure that two floating point registers' types are equivalent.
     bool equiv(FloatRegister other) const {
-        return true;
+        return other.type_ == type_;
     }
-    uint32_t size() const {
-        return sizeof(double);
+
+    uint32_t numAliased() const {
+        return Codes::NUM_TYPES;
     }
     uint32_t numAlignedAliased() const {
-        return 1;
+        return numAliased();
     }
-    void alignedAliased(uint32_t aliasIdx, FloatRegister *ret) {
-        MOZ_ASSERT(aliasIdx == 0);
-        *ret = *this;
+
+    // N.B. FloatRegister is an explicit outparam here because msvc-2010
+    // miscompiled it on win64 when the value was simply returned
+    void aliased(uint32_t aliasIdx, FloatRegister *ret) const {
+        MOZ_ASSERT(aliasIdx < Codes::NUM_TYPES);
+        *ret = FloatRegister(reg_, Codes::ContentType((aliasIdx + type_) % Codes::NUM_TYPES));
     }
+    void alignedAliased(uint32_t aliasIdx, FloatRegister *ret) const {
+        aliased(aliasIdx, ret);
+    }
+
     static TypedRegisterSet<FloatRegister> ReduceSetForPush(const TypedRegisterSet<FloatRegister> &s);
     static uint32_t GetSizeInBytes(const TypedRegisterSet<FloatRegister> &s);
     static uint32_t GetPushSizeInBytes(const TypedRegisterSet<FloatRegister> &s);
