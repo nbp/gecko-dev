@@ -246,7 +246,7 @@ class AssemblerBuffer
             slicesSkipped++;
         }
 
-        MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Invalid instruction cursor.");
+        MOZ_CRASH("Invalid instruction cursor.");
     }
 
     Inst* getInstBackwards(BufferOffset off, Slice* start, int startOffset, bool updateFinger = false) {
@@ -275,7 +275,7 @@ class AssemblerBuffer
             slicesSkipped++;
         }
 
-        MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Invalid instruction cursor.");
+        MOZ_CRASH("Invalid instruction cursor.");
     }
 
   public:
@@ -285,8 +285,11 @@ class AssemblerBuffer
         return getInst(off);
     }
 
+    // Get a pointer to the instruction at offset |off| which must be within the bounds of the
+    // buffer. Use |getInstOrNull()| if |off| may be unassigned.
     Inst* getInst(BufferOffset off) {
         const int offset = off.getOffset();
+        MOZ_RELEASE_ASSERT(off.assigned() && offset >= 0 && (unsigned)offset < size());
 
         // Is the instruction in the last slice?
         if (offset >= int(bufferSize))
