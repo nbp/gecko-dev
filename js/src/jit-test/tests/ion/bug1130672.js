@@ -1,3 +1,4 @@
+// |jit-test| error:ReferenceError
 function f(code) {
         g(code)
 }
