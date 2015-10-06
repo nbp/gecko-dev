@@ -326,6 +326,9 @@ void
 RValueAllocation::writePayload(CompactBufferWriter& writer, PayloadType type,
                                Payload p)
 {
+    if (!writer.oom())
+        return;
+
     switch (type) {
       case PAYLOAD_NONE:
         break;
