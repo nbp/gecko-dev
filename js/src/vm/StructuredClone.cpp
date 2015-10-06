@@ -162,6 +162,7 @@ struct SCOutput {
     bool writeArray(const T* p, size_t nbytes);
 
     bool extractBuffer(uint64_t** datap, size_t* sizep);
+    uint64_t sniffNumUntransferedTransferables();
 
     uint64_t count() const { return buf.length(); }
     uint64_t* rawBuffer() { return buf.begin(); }
@@ -725,6 +726,25 @@ SCOutput::extractBuffer(uint64_t** datap, size_t* sizep)
     return (*datap = buf.extractRawBuffer()) != nullptr;
 }
 
+uint64_t
+SCOutput::sniffNumUntransferedTransferables()
+{
+    if (buf.length() < 2)
+        return 0;
+
+    uint64_t header = buf[0];
+    uint64_t numTransferables = buf[1];
+
+    uint32_t tag = 0;
+    uint32_t data = 0;
+    SCInput::getPair(&header, &tag, &data);
+
+    if (tag != SCTAG_TRANSFER_MAP_HEADER || TransferableMapHeader(data) == SCTAG_TM_TRANSFERRED)
+        return 0;
+
+    return numTransferables;
+}
+
 } /* namespace js */
 
 JS_STATIC_ASSERT(JSString::MAX_LENGTH < UINT32_MAX);
@@ -734,9 +754,18 @@ JSStructuredCloneWriter::~JSStructuredCloneWriter()
     // Free any transferable data left lying around in the buffer
     uint64_t* data;
     size_t size;
-    MOZ_ALWAYS_TRUE(extractBuffer(&data, &size));
-    DiscardTransferables(data, size, callbacks, closure);
-    js_free(data);
+    if (extractBuffer(&data, &size)) {
+        DiscardTransferables(data, size, callbacks, closure);
+        js_free(data);
+    }
+    else {
+        // We can't get our hands on the data without opening up the
+        // Vector API.  Yet there can be untransfered transferables,
+        // which might be bad.  Crash if there are any such
+        // transferables, instead of risking an inconsistent system.
+        if (out.sniffNumUntransferedTransferables())
+            CrashAtUnhandlableOOM("failure to discard transferables");
+    }
 }
 
 bool
