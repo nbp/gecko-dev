@@ -278,6 +278,9 @@ struct BaselineScript
     void setNeedsArgsObj() {
         flags_ |= NEEDS_ARGS_OBJ;
     }
+    bool needsArgsObj() {
+        return flags_ & NEEDS_ARGS_OBJ;
+    }
 
     void setModifiesArguments() {
         flags_ |= MODIFIES_ARGUMENTS;
