@@ -138,6 +138,12 @@ BaselineFrame::initFunctionScopeObjects(JSContext* cx)
     return true;
 }
 
+void BaselineFrame::initArgsObj(ArgumentsObject& argsobj)
+{
+    MOZ_ASSERT(script()->needsArgsObj() || script()->baselineScript()->needsArgsObj());
+    initArgsObjUnchecked(argsobj);
+}
+
 bool
 BaselineFrame::initForOsr(InterpreterFrame* fp, uint32_t numStackValues)
 {

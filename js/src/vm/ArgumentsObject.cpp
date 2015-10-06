@@ -277,7 +277,8 @@ ArgumentsObject::create(JSContext* cx, HandleFunction callee, unsigned numActual
 ArgumentsObject*
 ArgumentsObject::createExpected(JSContext* cx, AbstractFramePtr frame)
 {
-    MOZ_ASSERT(frame.script()->needsArgsObj());
+    MOZ_ASSERT(frame.script()->needsArgsObj() ||
+               frame.script()->baselineScript()->needsArgsObj());
     RootedFunction callee(cx, frame.callee());
     CopyFrameArgs copy(frame);
     ArgumentsObject* argsobj = create(cx, callee, frame.numActualArgs(), copy);

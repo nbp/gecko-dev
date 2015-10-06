@@ -287,10 +287,7 @@ class BaselineFrame
         flags_ |= HAS_ARGS_OBJ;
         argsObj_ = &argsobj;
     }
-    void initArgsObj(ArgumentsObject& argsobj) {
-        MOZ_ASSERT(script()->needsArgsObj());
-        initArgsObjUnchecked(argsobj);
-    }
+    void initArgsObj(ArgumentsObject& argsobj);
     bool hasArgsObj() const {
         return flags_ & HAS_ARGS_OBJ;
     }
