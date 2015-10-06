@@ -278,7 +278,7 @@ class LifoAlloc
     MOZ_ALWAYS_INLINE
     void* allocInfallible(size_t n) {
         void* result = allocImpl(n);
-        MOZ_ASSERT(result, "[OOM] Is it really infallible?");
+        MOZ_RELEASE_ASSERT(result, "[OOM] Is it really infallible?");
         return result;
     }
 
