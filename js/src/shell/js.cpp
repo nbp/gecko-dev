@@ -2025,7 +2025,7 @@ DisassembleScript(JSContext* cx, HandleScript script, HandleFunction fun, bool l
             }
         }
     }
-    return true;
+    return !sp.hadOutOfMemory();
 }
 
 namespace {
