@@ -1107,6 +1107,7 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     marker(rt),
     usage(nullptr),
     mMemProfiler(rt),
+    callingGCCallback(false),
     maxMallocBytes(0),
     nextCellUniqueId_(LargestTaggedNullCellPointer + 1), // Ensure disjoint from null tagged pointers.
     numArenasFreeCommitted(0),
@@ -6296,6 +6297,24 @@ GCRuntime::checkIfGCAllowedInCurrentState(JS::gcreason::Reason reason)
     return true;
 }
 
+class MOZ_RAII AutoSetCallingGCCallback
+{
+    GCRuntime& runtime;
+
+  public:
+    AutoSetCallingGCCallback(GCRuntime& runtime)
+      : runtime(runtime)
+    {
+        MOZ_ASSERT(!runtime.callingGCCallback);
+        runtime.callingGCCallback = true;
+    }
+
+    ~AutoSetCallingGCCallback() {
+        MOZ_ASSERT(runtime.callingGCCallback);
+        runtime.callingGCCallback = false;
+    }
+};
+
 void
 GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::Reason reason)
 {
@@ -6304,6 +6323,10 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
 
     // Check if we are allowed to GC at this time before proceeding.
     if (!checkIfGCAllowedInCurrentState(reason))
+        return;
+
+    // The GC callback shouldn't call collect()
+    if (callingGCCallback)
         return;
 
     AutoTraceLog logGC(TraceLoggerForMainThread(rt), TraceLogger_GC);
@@ -6319,6 +6342,7 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
          * is the last context). Invoke the callback regardless.
          */
         if (!isIncrementalGCInProgress()) {
+            AutoSetCallingGCCallback scgc(*this);
             gcstats::AutoPhase ap(stats, gcstats::PHASE_GC_BEGIN);
             if (gcCallback.op)
                 gcCallback.op(rt, JSGC_BEGIN, gcCallback.data);
@@ -6328,6 +6352,7 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
         bool wasReset = gcCycle(nonincrementalByAPI, budget, reason);
 
         if (!isIncrementalGCInProgress()) {
+            AutoSetCallingGCCallback scgc(*this);
             gcstats::AutoPhase ap(stats, gcstats::PHASE_GC_END);
             if (gcCallback.op)
                 gcCallback.op(rt, JSGC_END, gcCallback.data);

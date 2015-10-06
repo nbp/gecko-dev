@@ -995,6 +995,9 @@ class GCRuntime
 
     MemProfiler mMemProfiler;
 
+    /* True if we're calling the GC callback */
+    bool callingGCCallback;
+
   private:
     // When empty, chunks reside in the emptyChunks pool and are re-used as
     // needed or eventually expired if not re-used. The emptyChunks pool gets
