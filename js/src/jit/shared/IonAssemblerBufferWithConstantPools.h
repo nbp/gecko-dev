@@ -771,7 +771,7 @@ struct AssemblerBufferWithConstantPools : public AssemblerBuffer<SliceSize, Inst
         // state into the BufferSlice.
         Pool** tmp = &perforatedSlice->pool;
         *tmp = static_cast<Pool*>(this->lifoAlloc_.alloc(sizeof(Pool)));
-        if (tmp == nullptr) {
+        if (*tmp == nullptr) {
             this->fail_oom();
             return;
         }
