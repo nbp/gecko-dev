@@ -1459,9 +1459,10 @@ ObjectGroupCompartment::replaceAllocationSiteGroup(JSScript* script, jsbytecode*
     key.kind = kind;
 
     AllocationSiteTable::Ptr p = allocationSiteTable->lookup(key);
-    MOZ_ASSERT(p);
+    MOZ_RELEASE_ASSERT(p);
     allocationSiteTable->remove(p);
-    allocationSiteTable->putNew(key, group);
+    if (!allocationSiteTable->putNew(key, group))
+        CrashAtUnhandlableOOM("Inconsistent object table");
 }
 
 /* static */ ObjectGroup*
@@ -1596,7 +1597,7 @@ ObjectGroupCompartment::removeDefaultNewGroup(const Class* clasp, TaggedProto pr
                                               JSObject* associated)
 {
     NewTable::Ptr p = defaultNewTable->lookup(NewEntry::Lookup(clasp, proto, associated));
-    MOZ_ASSERT(p);
+    MOZ_RELEASE_ASSERT(p);
 
     defaultNewTable->remove(p);
 }
@@ -1608,9 +1609,10 @@ ObjectGroupCompartment::replaceDefaultNewGroup(const Class* clasp, TaggedProto p
     NewEntry::Lookup lookup(clasp, proto, associated);
 
     NewTable::Ptr p = defaultNewTable->lookup(lookup);
-    MOZ_ASSERT(p);
+    MOZ_RELEASE_ASSERT(p);
     defaultNewTable->remove(p);
-    defaultNewTable->putNew(lookup, NewEntry(group, associated));
+    if (!defaultNewTable->putNew(lookup, NewEntry(group, associated)))
+        CrashAtUnhandlableOOM("Inconsistent object table");
 }
 
 /* static */
