@@ -384,6 +384,8 @@ class JSFunction : public js::NativeObject
                 return nullptr;
             return self->nonLazyScript();
         }
+        if (hasUncompiledScript())
+            return nullptr;
         return nonLazyScript();
     }
 
@@ -407,6 +409,8 @@ class JSFunction : public js::NativeObject
             flags_ |= INTERPRETED;
             initScript(script);
         }
+        if (hasUncompiledScript())
+            return nullptr;
         return nonLazyScript();
     }
 
