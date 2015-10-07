@@ -325,7 +325,7 @@ MaybeFoldConditionBlock(MIRGraph& graph, MBasicBlock* initialBlock)
     {
         AutoEnterOOMUnsafeRegion oomUnsafe;
         if (!SplitCriticalEdgesForBlock(graph, testBlock))
-            oomUnsafe.crash("MaybeFoldConditionBlock");
+            MOZ_CRASH("MaybeFoldConditionBlock - interesting");
     }
 
     MPhi* phi;
