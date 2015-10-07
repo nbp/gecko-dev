@@ -322,11 +322,8 @@ MaybeFoldConditionBlock(MIRGraph& graph, MBasicBlock* initialBlock)
     }
 
     // Make sure the test block does not have any outgoing loop backedges.
-    {
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        if (!SplitCriticalEdgesForBlock(graph, testBlock))
-            MOZ_CRASH("MaybeFoldConditionBlock - interesting");
-    }
+    if (!SplitCriticalEdgesForBlock(graph, testBlock))
+        MOZ_CRASH("MaybeFoldConditionBlock - interesting");
 
     MPhi* phi;
     MTest* finalTest;
