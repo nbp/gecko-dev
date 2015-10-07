@@ -53,6 +53,7 @@ void LoopChoiceNode::Accept(NodeVisitor* visitor) {
 }
 
 static const int kMaxLookaheadForBoyerMoore = 8;
+static const size_t ballastSize = 16 * 1024; // 16KiB
 
 RegExpNode::RegExpNode(LifoAlloc* alloc)
   : replacement_(nullptr), trace_count_(0), alloc_(alloc)
@@ -1675,6 +1676,11 @@ irregexp::CompilePattern(JSContext* cx, RegExpShared* shared, RegExpCompileData*
                                                       0,
                                                       &compiler,
                                                       compiler.accept());
+    if (!captured_body) {
+        JS_ReportOutOfMemory(cx);
+        return RegExpCode();
+    }
+
     RegExpNode* node = captured_body;
     bool is_end_anchored = data->tree->IsAnchoredAtEnd();
     bool is_start_anchored = sticky || data->tree->IsAnchoredAtStart();
@@ -1690,6 +1696,10 @@ irregexp::CompilePattern(JSContext* cx, RegExpShared* shared, RegExpCompileData*
                                      &compiler,
                                      captured_body,
                                      data->contains_anchor);
+        if (!loop_node) {
+            JS_ReportOutOfMemory(cx);
+            return RegExpCode();
+        }
 
         if (data->contains_anchor) {
             // Unroll loop once, to take care of the case that might start
@@ -1817,7 +1827,13 @@ RegExpDisjunction::ToNode(RegExpCompiler* compiler, RegExpNode* on_success)
     size_t length = alternatives.length();
     ChoiceNode* result = compiler->alloc()->newInfallible<ChoiceNode>(compiler->alloc(), length);
     for (size_t i = 0; i < length; i++) {
-        GuardedAlternative alternative(alternatives[i]->ToNode(compiler, on_success));
+        if (!compiler->alloc()->ensureUnusedApproximate(ballastSize))
+            return nullptr;
+
+        RegExpNode* alt_node = alternatives[i]->ToNode(compiler, on_success);
+        if (!alt_node)
+            return nullptr;
+        GuardedAlternative alternative(alt_node);
         result->AddAlternative(alternative);
     }
     return result;
@@ -1924,11 +1940,20 @@ RegExpQuantifier::ToNode(int min,
                 // Recurse once to get the loop or optional matches after the fixed
                 // ones.
                 RegExpNode* answer = ToNode(0, new_max, is_greedy, body, compiler, on_success, true);
+                if (!answer)
+                    return nullptr;
+
                 // Unroll the forced matches from 0 to min.  This can cause chains of
                 // TextNodes (which the parser does not generate).  These should be
                 // combined if it turns out they hinder good code generation.
-                for (int i = 0; i < min; i++)
+                for (int i = 0; i < min; i++) {
+                    if (!alloc->ensureUnusedApproximate(ballastSize))
+                        return nullptr;
+
                     answer = body->ToNode(compiler, answer);
+                    if (!answer)
+                        return nullptr;
+                }
                 return answer;
             }
         }
@@ -1939,13 +1964,22 @@ RegExpQuantifier::ToNode(int min,
                 // Unroll the optional matches up to max.
                 RegExpNode* answer = on_success;
                 for (int i = 0; i < max; i++) {
+                    if (!alloc->ensureUnusedApproximate(ballastSize))
+                        return nullptr;
+
                     ChoiceNode* alternation = alloc->newInfallible<ChoiceNode>(alloc, 2);
                     if (is_greedy) {
-                        alternation->AddAlternative(GuardedAlternative(body->ToNode(compiler, answer)));
+                        RegExpNode* node = body->ToNode(compiler, answer);
+                        if (!node)
+                            return nullptr;
+                        alternation->AddAlternative(GuardedAlternative(node));
                         alternation->AddAlternative(GuardedAlternative(on_success));
                     } else {
                         alternation->AddAlternative(GuardedAlternative(on_success));
-                        alternation->AddAlternative(GuardedAlternative(body->ToNode(compiler, answer)));
+                        RegExpNode* node = body->ToNode(compiler, answer);
+                        if (!node)
+                            return nullptr;
+                        alternation->AddAlternative(GuardedAlternative(node));
                     }
                     answer = alternation;
                     if (not_at_start) alternation->set_not_at_start();
@@ -1975,6 +2009,8 @@ RegExpQuantifier::ToNode(int min,
                                                   loop_return);
     }
     RegExpNode* body_node = body->ToNode(compiler, loop_return);
+    if (!body_node)
+        return nullptr;
     if (body_can_be_empty) {
         // If the body can be empty we need to store the start position
         // so we can bail out if it was empty.
@@ -2094,6 +2130,8 @@ RegExpLookahead::ToNode(RegExpCompiler* compiler, RegExpNode* on_success)
                                                                register_count,
                                                                register_start,
                                                                on_success));
+        if (!bodyNode)
+            return nullptr;
         return ActionNode::BeginSubmatch(stack_pointer_register,
                                          position_register,
                                          bodyNode);
@@ -2117,7 +2155,10 @@ RegExpLookahead::ToNode(RegExpCompiler* compiler, RegExpNode* on_success)
                                                       position_register,
                                                       register_count,
                                                       register_start);
-    GuardedAlternative body_alt(body()->ToNode(compiler, success));
+    RegExpNode* bodyNode = body()->ToNode(compiler, success);
+    if (!bodyNode)
+        return nullptr;
+    GuardedAlternative body_alt(bodyNode);
 
     ChoiceNode* choice_node =
         alloc->newInfallible<NegativeLookaheadChoiceNode>(alloc, body_alt, GuardedAlternative(on_success));
@@ -2143,6 +2184,8 @@ RegExpCapture::ToNode(RegExpTree* body,
     int end_reg = RegExpCapture::EndRegister(index);
     RegExpNode* store_end = ActionNode::StorePosition(end_reg, true, on_success);
     RegExpNode* body_node = body->ToNode(compiler, store_end);
+    if (!body_node)
+        return nullptr;
     return ActionNode::StorePosition(start_reg, true, body_node);
 }
 
@@ -2151,8 +2194,14 @@ RegExpAlternative::ToNode(RegExpCompiler* compiler, RegExpNode* on_success)
 {
     const RegExpTreeVector& children = nodes();
     RegExpNode* current = on_success;
-    for (int i = children.length() - 1; i >= 0; i--)
+    for (int i = children.length() - 1; i >= 0; i--) {
+        if (!compiler->alloc()->ensureUnusedApproximate(ballastSize))
+            return nullptr;
+
         current = children[i]->ToNode(compiler, current);
+        if (!current)
+            return nullptr;
+    }
     return current;
 }
 
