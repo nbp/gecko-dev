@@ -392,6 +392,10 @@ if CONFIG['ENABLE_TRACE_LOGGING']:
         'vm/TraceLoggingTypes.cpp',
     ]
 
+if CONFIG['ENABLE_THM']:
+    SOURCES += [
+    ]
+
 if not CONFIG['ENABLE_ION']:
     UNIFIED_SOURCES += [
         'jit/none/Trampoline-none.cpp'

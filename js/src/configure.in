@@ -1920,9 +1920,14 @@ MOZ_ARG_DISABLE_BOOL(ion,
 [  --disable-ion      Disable use of the IonMonkey JIT],
   ENABLE_ION= )
 
+MOZ_ARG_ENABLE_BOOL(thm,
+[  --enable-thm       Enable use of the Three Headed Monkey JIT],
+  ENABLE_THM=1)
+
 AC_SUBST(ENABLE_METHODJIT_SPEW)
 
 AC_SUBST(ENABLE_ION)
+AC_SUBST(ENABLE_THM)
 
 if test -n "$COMPILE_ENVIRONMENT"; then
     MOZ_COMPILER_OPTS
