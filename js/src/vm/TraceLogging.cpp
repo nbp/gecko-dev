@@ -752,6 +752,7 @@ TraceLoggerThreadState::init()
         enabledTextIds[TraceLogger_RegisterAllocation] = true;
         enabledTextIds[TraceLogger_GenerateCode] = true;
         enabledTextIds[TraceLogger_Scripts] = true;
+        enabledTextIds[TraceLogger_ConvertMIRToTHM] = true;
     }
 
     enabledTextIds[TraceLogger_Interpreter] = enabledTextIds[TraceLogger_Engine];

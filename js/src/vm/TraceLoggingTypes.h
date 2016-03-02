@@ -61,7 +61,11 @@
     _(AddKeepAliveInstructions)                       \
     _(GenerateLIR)                                    \
     _(RegisterAllocation)                             \
-    _(GenerateCode)
+    _(GenerateCode)                                   \
+                                                      \
+    /* Specific passes during ion compilation */      \
+    _(ConvertMIRToTHM)                                \
+    _(ConvertTHMToMIR)
 
 #define TRACELOGGER_LOG_ITEMS(_)                      \
     _(Bailout)                                        \

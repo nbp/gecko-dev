@@ -36,6 +36,8 @@ class LBlock;
 
 class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 {
+    // :prototype: need to mutate the internals without assertions.
+    friend class thm::THMGraph;
   public:
     enum Kind {
         NORMAL,
@@ -717,6 +719,9 @@ typedef Vector<MBasicBlock*, 1, JitAllocPolicy> MIRGraphReturns;
 
 class MIRGraph
 {
+    // :prototype: need to mutate the internals without assertions.
+    friend class THMGraph;
+
     InlineList<MBasicBlock> blocks_;
     TempAllocator* alloc_;
     MIRGraphReturns* returnAccumulator_;

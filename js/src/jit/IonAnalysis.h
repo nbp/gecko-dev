@@ -76,12 +76,16 @@ BuildPhiReverseMapping(MIRGraph& graph);
 
 void
 AssertBasicGraphCoherency(MIRGraph& graph);
+bool
+AssertBasicTHMGraphCoherency(MIRGraph& graph);
 
 void
 AssertGraphCoherency(MIRGraph& graph);
 
 void
 AssertExtendedGraphCoherency(MIRGraph& graph);
+bool
+AssertExtendedTHMGraphCoherency(MIRGraph& graph);
 
 bool
 EliminateRedundantChecks(MIRGraph& graph);

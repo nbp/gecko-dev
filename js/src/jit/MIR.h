@@ -34,6 +34,10 @@
 // Undo windows.h damage on Win64
 #undef MemoryBarrier
 
+namespace js { namespace jit { namespace thm {
+class THMGraph;
+}}}
+
 namespace js {
 
 class StringObject;
@@ -269,6 +273,8 @@ typedef InlineList<MUse>::iterator MUseIterator;
 // nodes holding such a reference (its use chain).
 class MNode : public TempObject
 {
+    // :prototype: need to mutate the internals without assertions.
+    friend class thm::THMGraph;
   protected:
     MBasicBlock* block_;    // Containing basic block.
 
@@ -410,6 +416,9 @@ class AliasSet {
 class MDefinition : public MNode
 {
     friend class MBasicBlock;
+
+    // :prototype: need to mutate the internals without assertions.
+    friend class thm::THMGraph;
 
   public:
     enum Opcode {
@@ -1007,6 +1016,8 @@ class MInstruction
 };
 
 #define INSTRUCTION_HEADER_WITHOUT_TYPEPOLICY(opcode)                       \
+    /* :prototype: need to mutate the internals without assertions. */      \
+    friend class thm::THMGraph;                                             \
     static const Opcode classOpcode = MDefinition::Op_##opcode;             \
     Opcode op() const override {                                            \
         return classOpcode;                                                 \
@@ -2725,7 +2736,7 @@ class MTableSwitch final
     Vector<size_t, 0, JitAllocPolicy> cases_;
 
     // Contains the blocks/cases that still need to get build
-    Vector<MBasicBlock*, 0, JitAllocPolicy> blocks_;
+    Vector<MBasicBlock*, 0, JitAllocPolicy> blocks_; // Todo, move this to IonBuilder.
 
     MUse operand_;
     int32_t low_;

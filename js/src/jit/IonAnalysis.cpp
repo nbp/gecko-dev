@@ -2643,7 +2643,6 @@ jit::AssertExtendedGraphCoherency(MIRGraph& graph)
 #endif
 }
 
-
 struct BoundsCheckInfo
 {
     MBoundsCheck* check;

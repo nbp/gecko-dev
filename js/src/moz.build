@@ -394,6 +394,7 @@ if CONFIG['ENABLE_TRACE_LOGGING']:
 
 if CONFIG['ENABLE_THM']:
     SOURCES += [
+        'jit/thm/THMGraph.cpp'
     ]
 
 if not CONFIG['ENABLE_ION']:

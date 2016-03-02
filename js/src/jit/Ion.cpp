@@ -52,6 +52,8 @@
 
 #include "jit/JitFrames-inl.h"
 #include "jit/shared/Lowering-shared-inl.h"
+#include "jit/thm/THMGraph.h"
+
 #include "vm/Debugger-inl.h"
 #include "vm/ScopeObject-inl.h"
 
@@ -1782,6 +1784,24 @@ OptimizeMIR(MIRGenerator* mir)
         if (mir->shouldCancel("Effective Address Analysis"))
             return false;
     }
+
+#if ENABLE_THM
+    if (getenv("ENABLE_THM")) {
+        AssertExtendedGraphCoherency(graph);
+        thm::THMGraph g(graph);
+        {
+            AutoTraceLog log(logger, TraceLogger_ConvertMIRToTHM);
+            if (!g.initFromMIRGraph())
+                return false;
+        }
+        {
+            AutoTraceLog log(logger, TraceLogger_ConvertTHMToMIR);
+            if (!g.exportToMIRGraph())
+                return false;
+        }
+        AssertExtendedGraphCoherency(graph);
+    }
+#endif
 
     if (mir->optimizationInfo().sincosEnabled()) {
         AutoTraceLog log(logger, TraceLogger_Sincos);
