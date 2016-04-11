@@ -449,6 +449,10 @@ private:
 
     // cache specific data
     nsCOMPtr<nsICacheEntry>           mCacheEntry;
+    // if the consumer may try to write alt data to the cache - signaled by
+    // HttpBaseChannel::mPreferredCachedAltDataType being not empty - this will
+    // be set during OnStopRequest before clearing mCacheEntry.
+    nsCOMPtr<nsICacheEntry>           mAltDataCacheEntry;
     // We must close mCacheInputStream explicitly to avoid leaks.
     AutoClose<nsIInputStream>         mCacheInputStream;
     RefPtr<nsInputStreamPump>       mCachePump;

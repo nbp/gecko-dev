@@ -242,6 +242,7 @@ private:
   void InvokeAvailableCallback(Callback const & aCallback);
 
   nsresult OpenOutputStreamInternal(int64_t offset, nsIOutputStream * *_retval);
+  nsresult OpenInputStreamInternal(int64_t offset, const char *aAltDataType, nsIInputStream * *_retval);
 
   void OnHandleClosed(CacheEntryHandle const* aHandle);
 
