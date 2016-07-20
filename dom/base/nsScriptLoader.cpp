@@ -1126,6 +1126,15 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
 
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Inform the HTTP cache that we prefer to have information coming from the
+  // bytecode cache instead of the sources, if such entry is already registered.
+  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
+  if (cic) {
+    cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
+  }
+
+  // Register if this request should prevent loading any other resources from
+  // the document.
   nsIScriptElement *script = aRequest->mElement;
   nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(channel));
 
