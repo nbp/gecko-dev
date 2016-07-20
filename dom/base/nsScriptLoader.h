@@ -652,6 +652,9 @@ public:
 private:
   virtual ~nsScriptLoadHandler();
 
+  // Type of data provided by the nsChannel.
+  enum class DataType : uint8_t { Unknown, Source, Bytecode };
+
   /*
    * Once the charset is found by the EnsureDecoder function, we can
    * incrementally convert the charset to the one expected by the JS Parser.
@@ -668,6 +671,9 @@ private:
                      const uint8_t* aData, uint32_t aDataLength,
                      bool aEndOfStream);
 
+  // Query the channel to find the data type associated with the input stream.
+  nsresult EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader);
+
   // ScriptLoader which will handle the parsed script.
   RefPtr<nsScriptLoader>        mScriptLoader;
 
@@ -679,6 +685,9 @@ private:
 
   // Status of SRI data operations.
   nsresult                      mSRIStatus;
+
+  // Record the data type of the input.
+  enum DataType                 mDataType;
 
   // Unicode decoder for charset.
   nsCOMPtr<nsIUnicodeDecoder>   mDecoder;

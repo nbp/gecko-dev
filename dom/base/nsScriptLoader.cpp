@@ -2695,6 +2695,7 @@ nsScriptLoadHandler::nsScriptLoadHandler(nsScriptLoader *aScriptLoader,
     mRequest(aRequest),
     mSRIDataVerifier(aSRIDataVerifier),
     mSRIStatus(NS_OK),
+    mDataType(DataType::Unknown),
     mDecoder(),
     mBuffer()
 {}
@@ -2717,22 +2718,33 @@ nsScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
     return NS_OK;
   }
 
-  if (!EnsureDecoder(aLoader, aData, aDataLength,
-                     /* aEndOfStream = */ false)) {
-    return NS_OK;
+  nsresult rv = NS_OK;
+  if (mDataType == DataType::Unknown) {
+    rv = EnsureKnownDataType(aLoader);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // Below we will/shall consume entire data chunk.
-  *aConsumedLength = aDataLength;
+  if (mDataType == DataType::Source) {
+    if (!EnsureDecoder(aLoader, aData, aDataLength,
+                       /* aEndOfStream = */ false)) {
+      return NS_OK;
+    }
 
-  // Decoder has already been initialized. -- trying to decode all loaded bytes.
-  nsresult rv = DecodeRawData(aData, aDataLength,
-                              /* aEndOfStream = */ false);
-  NS_ENSURE_SUCCESS(rv, rv);
+    // Below we will/shall consume entire data chunk.
+    *aConsumedLength = aDataLength;
 
-  // If SRI is required for this load, appending new bytes to the hash.
-  if (mSRIDataVerifier && NS_SUCCEEDED(mSRIStatus)) {
-    mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
+    // Decoder has already been initialized. -- trying to decode all loaded bytes.
+    rv = DecodeRawData(aData, aDataLength,
+                                /* aEndOfStream = */ false);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // If SRI is required for this load, appending new bytes to the hash.
+    if (mSRIDataVerifier && NS_SUCCEEDED(mSRIStatus)) {
+      mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
+    }
+  } else {
+    MOZ_ASSERT(mDataType == DataType::Bytecode);
+    MOZ_CRASH("NYI: nsScriptLoadHandler::OnIncrementalData");
   }
 
   return rv;
@@ -2855,6 +2867,36 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
   return true;
 }
 
+nsresult
+nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
+{
+  MOZ_ASSERT(mDataType == DataType::Unknown);
+  nsCOMPtr<nsIRequest> req;
+  nsresult rv = aLoader->GetRequest(getter_AddRefs(req));
+  NS_ASSERTION(req, "StreamLoader's request went away prematurely");
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIChannel> channel = do_QueryInterface(req);
+  if (!channel) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
+  if (cic) {
+    nsAutoCString altDataType;
+    cic->GetAlternativeDataType(altDataType);
+    if (altDataType.Equal(NS_LITERAL_CSTRING("javascript/moz-bytecode"))) {
+      mDataType == DataType::Bytecode;
+    } else {
+      mDataType == DataType::Source;
+    }
+  } else {
+    mDataType == DataType::Source;
+  }
+  MOZ_ASSERT(mDataType != DataType::Unknown);
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                       nsISupports* aContext,
@@ -2863,15 +2905,25 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                       const uint8_t* aData)
 {
   if (!mRequest->IsCanceled()) {
-    DebugOnly<bool> encoderSet =
-      EnsureDecoder(aLoader, aData, aDataLength, /* aEndOfStream = */ true);
-    MOZ_ASSERT(encoderSet);
-    DebugOnly<nsresult> rv = DecodeRawData(aData, aDataLength,
-                                           /* aEndOfStream = */ true);
+    if (mDataType == DataType::Unknown) {
+      nsresult rv = EnsureKnownDataType(aLoader);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
 
-    // If SRI is required for this load, appending new bytes to the hash.
-    if (mSRIDataVerifier && NS_SUCCEEDED(mSRIStatus)) {
-      mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
+    if (mDataType == DataType::Source) {
+      DebugOnly<bool> encoderSet =
+        EnsureDecoder(aLoader, aData, aDataLength, /* aEndOfStream = */ true);
+      MOZ_ASSERT(encoderSet);
+      DebugOnly<nsresult> rv = DecodeRawData(aData, aDataLength,
+                                             /* aEndOfStream = */ true);
+
+      // If SRI is required for this load, appending new bytes to the hash.
+      if (mSRIDataVerifier && NS_SUCCEEDED(mSRIStatus)) {
+        mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
+      }
+    } else {
+      MOZ_ASSERT(mDataType == DataType::Bytecode);
+      MOZ_CRASH("NYI: nsScriptLoadHandler::OnStreamComplete");
     }
   }
 
