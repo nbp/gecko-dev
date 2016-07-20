@@ -19,6 +19,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
+#include "nsICacheInfoChannel.h"
 #include "nsIDocument.h"
 #include "nsIIncrementalStreamLoader.h"
 #include "nsURIHashKey.h"
@@ -76,6 +77,7 @@ public:
       mElement(aElement),
       mScriptFromHead(false),
       mProgress(Progress::Loading),
+      mDataType(DataType::Unknown),
       mIsInline(true),
       mHasSourceMapURL(false),
       mIsDefer(false),
@@ -87,6 +89,8 @@ public:
       mIsTracking(false),
       mOffThreadToken(nullptr),
       mScriptText(),
+      mScriptBytecode(),
+      mBytecodeOffset(0),
       mJSVersion(aVersion),
       mLineNo(1),
       mCORSMode(aCORSMode),
@@ -143,21 +147,44 @@ public:
     mIsTracking = true;
   }
 
-  enum class Progress {
-    Loading,
+  enum class Progress : uint8_t {
+    Loading,        // Request either source or bytecode
+    Loading_Source, // Explicitly Request source stream
     Compiling,
     FetchingImports,
     Ready
   };
+
   bool IsReadyToRun() const {
     return mProgress == Progress::Ready;
   }
   bool IsLoading() const {
-    return mProgress == Progress::Loading;
+    return mProgress == Progress::Loading ||
+      mProgress == Progress::Loading_Source;
+  }
+  bool IsLoadingSource() const {
+    return mProgress == Progress::Loading_Source;
   }
   bool InCompilingStage() const {
     return mProgress == Progress::Compiling ||
            (IsReadyToRun() && mWasCompiledOMT);
+  }
+
+  // Type of data provided by the nsChannel.
+  enum class DataType : uint8_t {
+    Unknown,
+    Source,
+    Bytecode
+  };
+
+  bool IsUnknownDataType() const {
+    return mDataType == DataType::Unknown;
+  }
+  bool IsSource() const {
+    return mDataType == DataType::Source;
+  }
+  bool IsBytecode() const {
+    return mDataType == DataType::Bytecode;
   }
 
   void MaybeCancelOffThreadScript();
@@ -169,6 +196,7 @@ public:
   nsCOMPtr<nsIScriptElement> mElement;
   bool mScriptFromHead;   // Synchronous head script block loading of other non js/css content.
   Progress mProgress;     // Are we still waiting for a load to complete?
+  DataType mDataType;     // Does this contain Source or Bytecode?
   bool mIsInline;         // Is the script inline or loaded?
   bool mHasSourceMapURL;  // Does the HTTP header have a source map url?
   bool mIsDefer;          // True if we live in mDeferRequests.
@@ -180,10 +208,25 @@ public:
   bool mIsTracking;       // True if the script comes from a source on our tracking protection list.
   void* mOffThreadToken;  // Off-thread parsing token.
   nsString mSourceMapURL; // Holds source map url for loaded scripts
+
   // Holds script text for non-inline scripts. Don't use nsString so we can give
   // ownership to jsapi.
   mozilla::Vector<char16_t> mScriptText;
+
+  // Holds the SRI serialized hash and the script bytecode for non-inline
+  // scripts.
+  mozilla::Vector<uint8_t> mScriptBytecode;
+  uint32_t mBytecodeOffset; // Offset of the bytecode in mScriptBytecode
+
   uint32_t mJSVersion;
+
+  // Holds the Cache entry information, which is used to register the bytecode
+  // on the cache entry, such that we can load it the next time.
+  //
+  // Note, to avoid cycles throught the channel, we should not set this field
+  // until we finished streaming bytes from the channel.
+  nsCOMPtr<nsICacheInfoChannel> mCacheInfo;
+
   nsCOMPtr<nsIURI> mURI;
   nsCOMPtr<nsIPrincipal> mOriginPrincipal;
   nsAutoCString mURL;     // Keep the URI's filename alive during off thread parsing.
@@ -524,6 +567,13 @@ private:
   nsresult StartLoad(nsScriptLoadRequest *aRequest);
 
   /**
+   * Abort the current load, and re-start with a new load request from scratch
+   * without requesting any alternate data. Returns NS_ERROR_ABORT on success,
+   * as this error code is used to abort the input stream.
+   */
+  nsresult RestartLoad(nsScriptLoadRequest *aRequest);
+
+  /**
    * Process any pending requests asynchronously (i.e. off an event) if there
    * are any. Note that this is a no-op if there aren't any currently pending
    * requests.
@@ -692,6 +742,15 @@ private:
   bool EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
                      const uint8_t* aData, uint32_t aDataLength,
                      bool aEndOfStream, nsCString& oCharset);
+
+  /*
+   * When streaming bytecode, we have the opportunity to fallback early if SRI
+   * does not match the expectation of the document.
+   */
+  nsresult MaybeDecodeSRI();
+
+  // Query the channel to find the data type associated with the input stream.
+  nsresult EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader);
 
   // ScriptLoader which will handle the parsed script.
   RefPtr<nsScriptLoader>        mScriptLoader;
