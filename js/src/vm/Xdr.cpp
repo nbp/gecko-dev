@@ -148,17 +148,18 @@ VersionCheck(XDRState<mode>* xdr)
 
 template<XDRMode mode>
 bool
-XDRState<mode>::codeFunction(MutableHandleFunction objp)
+XDRState<mode>::codeFunction(MutableHandleFunction funp)
 {
     if (mode == XDR_DECODE)
-        objp.set(nullptr);
+        funp.set(nullptr);
 
     if (!VersionCheck(this))
         return false;
 
     RootedObject staticLexical(cx(), &cx()->global()->lexicalScope().staticBlock());
-    if (!XDRInterpretedFunction(this, staticLexical, nullptr, objp)) {
+    if (!XDRInterpretedFunction(this, staticLexical, nullptr, funp)) {
         postProcessContextErrors(cx());
+        funp.set(nullptr);
         return false;
     }
 
@@ -178,6 +179,7 @@ XDRState<mode>::codeScript(MutableHandleScript scriptp)
     RootedObject staticLexical(cx(), &cx()->global()->lexicalScope().staticBlock());
     if (!XDRScript(this, staticLexical, nullptr, nullptr, scriptp)) {
         postProcessContextErrors(cx());
+        scriptp.set(nullptr);
         return false;
     }
 
