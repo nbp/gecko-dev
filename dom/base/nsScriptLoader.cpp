@@ -978,7 +978,7 @@ nsScriptLoader::StartFetchingModuleAndDependencies(nsModuleLoadRequest* aRequest
 
   RefPtr<GenericPromise> ready = childRequest->mReady.Ensure(__func__);
 
-  nsresult rv = StartLoad(childRequest, NS_LITERAL_STRING("module"), false);
+  nsresult rv = StartLoad(childRequest, false);
   if (NS_FAILED(rv)) {
     childRequest->mReady.Reject(rv, __func__);
     return ready;
