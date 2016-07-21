@@ -1057,8 +1057,7 @@ nsScriptLoader::ProcessLoadedModuleTree(nsModuleLoadRequest* aRequest)
 }
 
 nsresult
-nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
-                          bool aScriptFromHead)
+nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, bool aScriptFromHead)
 {
   MOZ_ASSERT(aRequest->IsLoading());
 
@@ -1410,7 +1409,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 
       // set aScriptFromHead to false so we don't treat non preloaded scripts as
       // blockers for full page load. See bug 792438.
-      rv = StartLoad(request, type, false);
+      rv = StartLoad(request, false);
       if (NS_FAILED(rv)) {
         // Asynchronously report the load failure
         NS_DispatchToCurrentThread(
@@ -2649,7 +2648,7 @@ nsScriptLoader::PreloadURI(nsIURI *aURI, const nsAString &aCharset,
   request->mIsInline = false;
   request->mReferrerPolicy = aReferrerPolicy;
 
-  nsresult rv = StartLoad(request, aType, aScriptFromHead);
+  nsresult rv = StartLoad(request, aScriptFromHead);
   if (NS_FAILED(rv)) {
     return;
   }
