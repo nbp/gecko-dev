@@ -2734,7 +2734,7 @@ nsScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
 
     // Decoder has already been initialized. -- trying to decode all loaded bytes.
     rv = DecodeRawData(aData, aDataLength,
-                                /* aEndOfStream = */ false);
+                       /* aEndOfStream = */ false);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // If SRI is required for this load, appending new bytes to the hash.
