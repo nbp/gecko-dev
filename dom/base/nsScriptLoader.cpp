@@ -2885,13 +2885,13 @@ nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
   if (cic) {
     nsAutoCString altDataType;
     cic->GetAlternativeDataType(altDataType);
-    if (altDataType.Equal(NS_LITERAL_CSTRING("javascript/moz-bytecode"))) {
-      mDataType == DataType::Bytecode;
+    if (altDataType.EqualsLiteral("javascript/moz-bytecode")) {
+      mDataType = DataType::Bytecode;
     } else {
-      mDataType == DataType::Source;
+      mDataType = DataType::Source;
     }
   } else {
-    mDataType == DataType::Source;
+    mDataType = DataType::Source;
   }
   MOZ_ASSERT(mDataType != DataType::Unknown);
   return NS_OK;
@@ -2924,6 +2924,7 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     } else {
       MOZ_ASSERT(mDataType == DataType::Bytecode);
       MOZ_CRASH("NYI: nsScriptLoadHandler::OnStreamComplete");
+      // TODO: Push bytes, and fill SRI data.
     }
   }
 
