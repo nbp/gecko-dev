@@ -667,7 +667,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
             if (!comp->creationOptions().cloneSingletons() ||
                 !comp->behaviors().getSingletonsAsTemplates())
             {
-                return xdr->fail(TranscodeResult_Failure_RunOnceNotSupported);
+                return xdr->fail(JS::TranscodeResult_Failure_RunOnceNotSupported);
             }
         }
 
@@ -1093,7 +1093,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
                     funEnclosingScope = function->nonLazyScript()->enclosingStaticScope();
                 else {
                     MOZ_ASSERT(function->isAsmJSNative());
-                    return xdr->fail(TranscodeResult_Failure_AsmJSNotSupported);
+                    return xdr->fail(JS::TranscodeResult_Failure_AsmJSNotSupported);
                 }
 
                 StaticScopeIter<NoGC> ssi(funEnclosingScope);
@@ -1159,7 +1159,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
 
           default: {
             MOZ_ASSERT(false, "Unknown class kind.");
-            return xdr->fail(TranscodeResult_Failure_UnknownClassKind);
+            return xdr->fail(JS::TranscodeResult_Failure_UnknownClassKind);
           }
         }
     }
