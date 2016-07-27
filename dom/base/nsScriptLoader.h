@@ -686,7 +686,7 @@ private:
   nsresult                      mSRIStatus;
 
   // Record the data type of the input.
-  enum DataType                 mDataType;
+  DataType                      mDataType;
 
   // Unicode decoder for charset.
   nsCOMPtr<nsIUnicodeDecoder>   mDecoder;
