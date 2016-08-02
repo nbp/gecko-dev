@@ -50,15 +50,31 @@ class SRICheckDataVerifier final
     SRICheckDataVerifier(const SRIMetadata& aMetadata,
                          const nsIDocument* aDocument);
 
+    // Append the following bytes in the content of the string used to compute
+    // the hash.
     nsresult Update(uint32_t aStringLen, const uint8_t* aString);
+
+    // Return the length of the computed hash.
+    size_t EncodedHashLength();
+
+    // Decode the computed hash from a cache. The array should be at least the
+    // same size or larger than the value returned by EncodedHashLength.
+    nsresult DecodeHash(uint32_t aDataLen, const uint8_t* aData);
+
+    // Verify that the computed hash corresponds to the metadata.
     nsresult Verify(const SRIMetadata& aMetadata, nsIChannel* aChannel,
                     const CORSMode aCORSMode, const nsIDocument* aDocument);
+
+    // Encode the computed hash in a buffer which is at least the size returned
+    // by EncodedHashLength.
+    nsresult EncodeVerifiedHash(uint32_t aDataLen, uint8_t* aData);
 
   private:
     nsCOMPtr<nsICryptoHash> mCryptoHash;
     nsAutoCString           mComputedHash;
     size_t                  mBytesHashed;
     int8_t                  mHashType;
+    uint32_t                mHashLength;
     bool                    mInvalidMetadata;
     bool                    mComplete;
 
