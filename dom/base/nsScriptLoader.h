@@ -177,6 +177,7 @@ public:
   const mozilla::CORSMode mCORSMode;
   const mozilla::dom::SRIMetadata mIntegrity;
   mozilla::net::ReferrerPolicy mReferrerPolicy;
+  bool mScriptFromHead;   // Synchronous head script block loading of other non js/css content.
 };
 
 class nsScriptLoadRequestList : private mozilla::LinkedList<nsScriptLoadRequest>
@@ -502,7 +503,7 @@ private:
   /**
    * Start a load for aRequest's URI.
    */
-  nsresult StartLoad(nsScriptLoadRequest *aRequest, bool aScriptFromHead);
+  nsresult StartLoad(nsScriptLoadRequest *aRequest);
 
   /**
    * Process any pending requests asynchronously (i.e. off an event) if there
