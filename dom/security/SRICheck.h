@@ -50,31 +50,38 @@ class SRICheckDataVerifier final
     SRICheckDataVerifier(const SRIMetadata& aMetadata,
                          const nsIDocument* aDocument);
 
-    // Append the following bytes in the content of the string used to compute
-    // the hash.
+    // Append the following bytes to the content used to compute the hash. Once
+    // all bytes are streamed, use the Verify function to check the integrity.
     nsresult Update(uint32_t aStringLen, const uint8_t* aString);
-
-    // Return the length of the computed hash.
-    size_t EncodedHashLength();
-
-    // Decode the computed hash from a cache. The array should be at least the
-    // same size or larger than the value returned by EncodedHashLength.
-    nsresult DecodeHash(uint32_t aDataLen, const uint8_t* aData);
 
     // Verify that the computed hash corresponds to the metadata.
     nsresult Verify(const SRIMetadata& aMetadata, nsIChannel* aChannel,
                     const CORSMode aCORSMode, const nsIDocument* aDocument);
 
-    // Encode the computed hash in a buffer which is at least the size returned
-    // by EncodedHashLength.
-    nsresult EncodeVerifiedHash(uint32_t aDataLen, uint8_t* aData);
+    bool IsComplete() const {
+      return mComplete;
+    }
+
+    // Return the length of the serialized hash.
+    size_t SerializedHashLength();
+
+    // Read the computed hash from a cache. The array should be at least the
+    // same size or larger than the value returned by SerializedHashLength.
+    // Once the deserialized function is called, one can call the Verify
+    // function to check the integrity with the metadata present in the
+    // document, in case the document metadata changed.
+    nsresult DeserializeVerifiedHash(uint32_t aDataLen, const uint8_t* aData);
+
+    // Write the computed hash in a buffer which is at least the size returned
+    // by SerializedHashLength.
+    nsresult SerializeVerifiedHash(uint32_t aDataLen, uint8_t* aData);
 
   private:
     nsCOMPtr<nsICryptoHash> mCryptoHash;
     nsAutoCString           mComputedHash;
     size_t                  mBytesHashed;
-    int8_t                  mHashType;
     uint32_t                mHashLength;
+    int8_t                  mHashType;
     bool                    mInvalidMetadata;
     bool                    mComplete;
 

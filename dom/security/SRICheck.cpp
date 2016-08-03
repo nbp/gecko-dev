@@ -273,52 +273,6 @@ SRICheckDataVerifier::Update(uint32_t aStringLen, const uint8_t* aString)
   return mCryptoHash->Update(aString, aStringLen);
 }
 
-size_t
-SRICheckDataVerifier::EncodedHashLength()
-{
-  return sizeof(mHashType) + sizeof(mHashLength) + mHashLength;
-}
-
-nsresult
-SRICheckDataVerifier::DecodeHash(uint32_t aDataLen, const uint8_t* aData)
-{
-  MOZ_ASSERT(!mCryptoHash); // EnsureCryptoHash should not have been called
-  NS_ENSURE_ARG_POINTER(aData);
-  if (mInvalidMetadata) {
-    return NS_OK; // ignoring any data updates, see mInvalidMetadata usage
-  }
-
-  // we expect to always encode an SRI, even if it is empty or incomplete
-  if (aDataLen < EncodedHashLength()) {
-    SRILOG(("SRICheckDataVerifier::DecodeHash, encoded length[%u] is not small", aDataLen));
-    return NS_ERROR_SRI_CORRUPT;
-  }
-
-  // decode the content of the buffer
-  size_t offset = 0;
-  if (*reinterpret_cast<const decltype(mHashType)*>(&aData[offset]) != mHashType) {
-    SRILOG(("SRICheckDataVerifier::DecodeHash, hash type[%d] does not match[%d]",
-            *reinterpret_cast<const decltype(mHashType)*>(&aData[offset]),
-             mHashType));
-    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
-  }
-  offset += sizeof(mHashType);
-
-  if (*reinterpret_cast<const decltype(mHashLength)*>(&aData[offset]) != mHashLength) {
-    SRILOG(("SRICheckDataVerifier::DecodeHash, hash length[%d] does not match[%d]",
-            *reinterpret_cast<const decltype(mHashLength)*>(&aData[offset]),
-             mHashLength));
-    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
-  }
-  offset += sizeof(mHashLength);
-
-  // copy the hash to mComputedHash, as-if we had finished streaming the bytes
-  mComputedHash.Assign(reinterpret_cast<const char*>(&aData[offset]), mHashLength);
-  mCryptoHash = nullptr;
-  mComplete = true;
-  return NS_OK;
-}
-
 nsresult
 SRICheckDataVerifier::Finish()
 {
@@ -434,12 +388,58 @@ SRICheckDataVerifier::Verify(const SRIMetadata& aMetadata,
   return NS_ERROR_SRI_CORRUPT;
 }
 
+size_t
+SRICheckDataVerifier::SerializedHashLength()
+{
+  return sizeof(mHashType) + sizeof(mHashLength) + mHashLength;
+}
+
 nsresult
-SRICheckDataVerifier::EncodeVerifiedHash(uint32_t aDataLen, uint8_t* aData)
+SRICheckDataVerifier::DeserializeVerifiedHash(uint32_t aDataLen, const uint8_t* aData)
+{
+  MOZ_ASSERT(!mCryptoHash); // EnsureCryptoHash should not have been called
+  NS_ENSURE_ARG_POINTER(aData);
+  if (mInvalidMetadata) {
+    return NS_OK; // ignoring any data updates, see mInvalidMetadata usage
+  }
+
+  // we expect to always encode an SRI, even if it is empty or incomplete
+  if (aDataLen < SerializedHashLength()) {
+    SRILOG(("SRICheckDataVerifier::DecodeHash, encoded length[%u] is not small", aDataLen));
+    return NS_ERROR_SRI_CORRUPT;
+  }
+
+  // decode the content of the buffer
+  size_t offset = 0;
+  if (*reinterpret_cast<const decltype(mHashType)*>(&aData[offset]) != mHashType) {
+    SRILOG(("SRICheckDataVerifier::DecodeHash, hash type[%d] does not match[%d]",
+            *reinterpret_cast<const decltype(mHashType)*>(&aData[offset]),
+             mHashType));
+    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
+  }
+  offset += sizeof(mHashType);
+
+  if (*reinterpret_cast<const decltype(mHashLength)*>(&aData[offset]) != mHashLength) {
+    SRILOG(("SRICheckDataVerifier::DecodeHash, hash length[%d] does not match[%d]",
+            *reinterpret_cast<const decltype(mHashLength)*>(&aData[offset]),
+             mHashLength));
+    return NS_ERROR_SRI_UNEXPECTED_HASH_TYPE;
+  }
+  offset += sizeof(mHashLength);
+
+  // copy the hash to mComputedHash, as-if we had finished streaming the bytes
+  mComputedHash.Assign(reinterpret_cast<const char*>(&aData[offset]), mHashLength);
+  mCryptoHash = nullptr;
+  mComplete = true;
+  return NS_OK;
+}
+
+nsresult
+SRICheckDataVerifier::SerializeVerifiedHash(uint32_t aDataLen, uint8_t* aData)
 {
   MOZ_ASSERT(mComplete); // finished streaming
   NS_ENSURE_ARG_POINTER(aData);
-  NS_ENSURE_TRUE(aDataLen >= EncodedHashLength(), NS_ERROR_INVALID_ARG);
+  NS_ENSURE_TRUE(aDataLen >= SerializedHashLength(), NS_ERROR_INVALID_ARG);
 
   // decode the content of the buffer
   size_t offset = 0;
