@@ -87,8 +87,6 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsScriptLoadRequest)
 
 nsScriptLoadRequest::~nsScriptLoadRequest()
 {
-  js_free(mScriptTextBuf);
-
   // We should always clean up any off-thread script parsing resources.
   MOZ_ASSERT(!mOffThreadToken);
 
@@ -689,9 +687,7 @@ nsScriptLoader::ProcessFetchedModuleSource(nsModuleLoadRequest* aRequest)
   nsresult rv = CreateModuleScript(aRequest);
   SetModuleFetchFinishedAndResumeWaitingRequests(aRequest, rv);
 
-  free(aRequest->mScriptTextBuf);
-  aRequest->mScriptTextBuf = nullptr;
-  aRequest->mScriptTextLength = 0;
+  aRequest->mScriptText.clearAndFree();
 
   if (NS_SUCCEEDED(rv)) {
     StartFetchingModuleDependencies(aRequest);
@@ -1712,7 +1708,7 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
   JS::CompileOptions options(cx);
   FillCompileOptionsForRequest(jsapi, aRequest, global, &options);
 
-  if (!JS::CanCompileOffThread(cx, options, aRequest->mScriptTextLength)) {
+  if (!JS::CanCompileOffThread(cx, options, aRequest->mScriptText.length())) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1721,14 +1717,16 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
 
   if (aRequest->IsModuleRequest()) {
     if (!JS::CompileOffThreadModule(cx, options,
-                                    aRequest->mScriptTextBuf, aRequest->mScriptTextLength,
+                                    aRequest->mScriptText.begin(),
+                                    aRequest->mScriptText.length(),
                                     OffThreadScriptLoaderCallback,
                                     static_cast<void*>(runnable))) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
   } else {
     if (!JS::CompileOffThread(cx, options,
-                              aRequest->mScriptTextBuf, aRequest->mScriptTextLength,
+                              aRequest->mScriptText.begin(),
+                              aRequest->mScriptText.length(),
                               OffThreadScriptLoaderCallback,
                               static_cast<void*>(runnable))) {
       return NS_ERROR_OUT_OF_MEMORY;
@@ -1776,8 +1774,8 @@ nsScriptLoader::GetScriptSource(nsScriptLoadRequest* aRequest, nsAutoString& inl
                               SourceBufferHolder::NoOwnership);
   }
 
-  return SourceBufferHolder(aRequest->mScriptTextBuf,
-                            aRequest->mScriptTextLength,
+  return SourceBufferHolder(aRequest->mScriptText.begin(),
+                            aRequest->mScriptText.length(),
                             SourceBufferHolder::NoOwnership);
 }
 
@@ -1872,9 +1870,7 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
   }
 
   // Free any source data.
-  free(aRequest->mScriptTextBuf);
-  aRequest->mScriptTextBuf = nullptr;
-  aRequest->mScriptTextLength = 0;
+  aRequest->mScriptText.clearAndFree();
 
   return rv;
 }
@@ -2324,7 +2320,6 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                  nsISupports* aContext,
                                  nsresult aChannelStatus,
                                  nsresult aSRIStatus,
-                                 mozilla::Vector<char16_t> &aString,
                                  mozilla::dom::SRICheckDataVerifier* aSRIDataVerifier)
 {
   nsScriptLoadRequest* request = static_cast<nsScriptLoadRequest*>(aContext);
@@ -2366,7 +2361,7 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
   }
 
   if (NS_SUCCEEDED(rv)) {
-    rv = PrepareLoadedRequest(request, aLoader, aChannelStatus, aString);
+    rv = PrepareLoadedRequest(request, aLoader, aChannelStatus);
   }
 
   if (NS_FAILED(rv)) {
@@ -2472,8 +2467,7 @@ nsScriptLoader::MaybeMoveToLoadedList(nsScriptLoadRequest* aRequest)
 nsresult
 nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                                      nsIIncrementalStreamLoader* aLoader,
-                                     nsresult aStatus,
-                                     mozilla::Vector<char16_t> &aString)
+                                     nsresult aStatus)
 {
   if (NS_FAILED(aStatus)) {
     return aStatus;
@@ -2519,11 +2513,6 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
     rv = nsContentUtils::GetSecurityManager()->
       GetChannelResultPrincipal(channel, getter_AddRefs(aRequest->mOriginPrincipal));
     NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (!aString.empty()) {
-    aRequest->mScriptTextLength = aString.length();
-    aRequest->mScriptTextBuf = aString.extractOrCopyRawBuffer();
   }
 
   // This assertion could fire errorously if we ran out of memory when
@@ -2700,7 +2689,7 @@ nsScriptLoadHandler::nsScriptLoadHandler(nsScriptLoader *aScriptLoader,
     mSRIStatus(NS_OK),
     mDataType(DataType::Unknown),
     mDecoder(),
-    mBuffer()
+    mBuffer(aRequest->mScriptText)
 {}
 
 nsScriptLoadHandler::~nsScriptLoadHandler()
@@ -2933,5 +2922,5 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
 
   // we have to mediate and use mRequest.
   return mScriptLoader->OnStreamComplete(aLoader, mRequest, aStatus, mSRIStatus,
-                                         mBuffer, mSRIDataVerifier);
+                                         mSRIDataVerifier);
 }
