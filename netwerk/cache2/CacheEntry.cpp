@@ -1498,6 +1498,14 @@ NS_IMETHODIMP CacheEntry::GetDataSize(int64_t *aDataSize)
   return NS_OK;
 }
 
+
+NS_IMETHODIMP CacheEntry::GetAltDataSize(int64_t *aDataSize)
+{
+  LOG(("CacheEntry::GetAltDataSize [this=%p]", this));
+  return mFile->GetAltDataSize(aDataSize);
+}
+
+
 NS_IMETHODIMP CacheEntry::MarkValid()
 {
   // NOT IMPLEMENTED ACTUALLY

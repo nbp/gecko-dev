@@ -85,7 +85,7 @@ function readServerContent(request, buffer)
       var cc = chan.QueryInterface(Ci.nsICacheInfoChannel);
       cc.preferAlternativeDataType(altContentType);
 
-      chan.asyncOpen2(new ChannelListener(readAltContent, null, CL_ALLOW_UNKNOWN_CL));
+      chan.asyncOpen2(new ChannelListener(readAltContent, null));
     }};
 
     // we may need some gc() calls first here...
