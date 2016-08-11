@@ -127,6 +127,7 @@ nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
                           const nsAString& aScript,
                           JS::Handle<JSObject*> aEvaluationGlobal,
+                          JS::MutableHandle<JSScript*> aScriptHandle,
                           JS::CompileOptions& aCompileOptions,
                           const EvaluateOptions& aEvaluateOptions,
                           JS::MutableHandle<JS::Value> aRetValue)
@@ -134,7 +135,7 @@ nsJSUtils::EvaluateString(JSContext* aCx,
   const nsPromiseFlatString& flatScript = PromiseFlatString(aScript);
   JS::SourceBufferHolder srcBuf(flatScript.get(), aScript.Length(),
                                 JS::SourceBufferHolder::NoOwnership);
-  return EvaluateString(aCx, srcBuf, aEvaluationGlobal, aCompileOptions,
+  return EvaluateString(aCx, srcBuf, aEvaluationGlobal, aScriptHandle, aCompileOptions,
                         aEvaluateOptions, aRetValue, nullptr);
 }
 
@@ -142,6 +143,7 @@ nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
                           JS::SourceBufferHolder& aSrcBuf,
                           JS::Handle<JSObject*> aEvaluationGlobal,
+                          JS::MutableHandle<JSScript*> aScript,
                           JS::CompileOptions& aCompileOptions,
                           const EvaluateOptions& aEvaluateOptions,
                           JS::MutableHandle<JS::Value> aRetValue,
@@ -194,11 +196,10 @@ nsJSUtils::EvaluateString(JSContext* aCx,
     }
 
     if (ok && aOffThreadToken) {
-      JS::Rooted<JSScript*>
-        script(aCx, JS::FinishOffThreadScript(aCx, *aOffThreadToken));
+      aScript.set(JS::FinishOffThreadScript(aCx, *aOffThreadToken));
       *aOffThreadToken = nullptr; // Mark the token as having been finished.
-      if (script) {
-        ok = JS_ExecuteScript(aCx, scopeChain, script);
+      if (aScript) {
+        ok = JS_ExecuteScript(aCx, scopeChain, aScript);
       } else {
         ok = false;
       }
@@ -232,11 +233,12 @@ nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
                           JS::SourceBufferHolder& aSrcBuf,
                           JS::Handle<JSObject*> aEvaluationGlobal,
+                          JS::MutableHandle<JSScript*> aScript,
                           JS::CompileOptions& aCompileOptions,
                           const EvaluateOptions& aEvaluateOptions,
                           JS::MutableHandle<JS::Value> aRetValue)
 {
-  return EvaluateString(aCx, aSrcBuf, aEvaluationGlobal, aCompileOptions,
+  return EvaluateString(aCx, aSrcBuf, aEvaluationGlobal, aScript, aCompileOptions,
                         aEvaluateOptions, aRetValue, nullptr);
 }
 
@@ -244,12 +246,13 @@ nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
                           const nsAString& aScript,
                           JS::Handle<JSObject*> aEvaluationGlobal,
+                          JS::MutableHandle<JSScript*> aScriptHandle,
                           JS::CompileOptions& aCompileOptions)
 {
   EvaluateOptions options(aCx);
   aCompileOptions.setNoScriptRval(true);
   JS::RootedValue unused(aCx);
-  return EvaluateString(aCx, aScript, aEvaluationGlobal, aCompileOptions,
+  return EvaluateString(aCx, aScript, aEvaluationGlobal, aScriptHandle, aCompileOptions,
                         options, &unused);
 }
 
@@ -257,14 +260,102 @@ nsresult
 nsJSUtils::EvaluateString(JSContext* aCx,
                           JS::SourceBufferHolder& aSrcBuf,
                           JS::Handle<JSObject*> aEvaluationGlobal,
+                          JS::MutableHandle<JSScript*> aScript,
                           JS::CompileOptions& aCompileOptions,
                           void **aOffThreadToken)
 {
   EvaluateOptions options(aCx);
   aCompileOptions.setNoScriptRval(true);
   JS::RootedValue unused(aCx);
-  return EvaluateString(aCx, aSrcBuf, aEvaluationGlobal, aCompileOptions,
+  return EvaluateString(aCx, aSrcBuf, aEvaluationGlobal, aScript, aCompileOptions,
                         options, &unused, aOffThreadToken);
+}
+
+nsresult
+nsJSUtils::EvaluateBytecode(JSContext* aCx,
+                            mozilla::Vector<uint8_t>& aBytecodeBuf,
+                            size_t aBytecodeIndex,
+                            JS::Handle<JSObject*> aEvaluationGlobal,
+                            JS::CompileOptions &aCompileOptions)
+{
+  PROFILER_LABEL("nsJSUtils", "EvaluateBytecode",
+    js::ProfileEntry::Category::JS);
+
+  EvaluateOptions options(aCx);
+  aCompileOptions.setNoScriptRval(true);
+  JS::RootedValue retValue(aCx);
+
+  MOZ_ASSERT_IF(aCompileOptions.versionSet,
+                aCompileOptions.version != JSVERSION_UNKNOWN);
+  MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
+  MOZ_ASSERT(!aBytecodeBuf.empty());
+  MOZ_ASSERT(js::GetGlobalForObjectCrossCompartment(aEvaluationGlobal) ==
+             aEvaluationGlobal);
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(nsContentUtils::IsInMicroTask());
+
+  // Unfortunately, the JS engine actually compiles scripts with a return value
+  // in a different, less efficient way.  Furthermore, it can't JIT them in many
+  // cases.  So we need to be explicitly told whether the caller cares about the
+  // return value.  Callers can do this by calling the other overload of
+  // EvaluateString() which calls this function with
+  // aCompileOptions.noScriptRval set to true.
+  retValue.setUndefined();
+
+  nsresult rv = NS_OK;
+
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aEvaluationGlobal).Allowed(), NS_OK);
+
+  bool ok = true;
+  // Scope the JSAutoCompartment so that we can later wrap the return value
+  // into the caller's cx.
+  {
+    JSAutoCompartment ac(aCx, aEvaluationGlobal);
+
+    // Now make sure to wrap the scope chain into the right compartment.
+    JS::AutoObjectVector scopeChain(aCx);
+    if (!scopeChain.reserve(options.scopeChain.length())) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    for (size_t i = 0; i < options.scopeChain.length(); ++i) {
+      JS::ExposeObjectToActiveJS(options.scopeChain[i]);
+      scopeChain.infallibleAppend(options.scopeChain[i]);
+      if (!JS_WrapObject(aCx, scopeChain[i])) {
+        ok = false;
+        break;
+      }
+    }
+
+    JS::Rooted<JSScript*> script(aCx);
+    JS::TranscodeResult tr = JS::DecodeScript(aCx, aBytecodeBuf, &script, aBytecodeIndex);
+    if (tr == JS::TranscodeResult_Ok) {
+      ok = JS_ExecuteScript(aCx, scopeChain, script);
+    } else {
+      // TODO: Handle logical failures in case where the version check is failing.
+      ok = false;
+    }
+  }
+
+  if (!ok) {
+    if (JS_IsExceptionPending(aCx)) {
+      rv = NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW;
+    } else {
+      rv = NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE;
+    }
+
+    if (!aCompileOptions.noScriptRval) {
+      retValue.setUndefined();
+    }
+  }
+
+  // Wrap the return value into whatever compartment aCx was in.
+  if (ok && !aCompileOptions.noScriptRval) {
+    if (!JS_WrapValue(aCx, &retValue)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+  return rv;
 }
 
 nsresult

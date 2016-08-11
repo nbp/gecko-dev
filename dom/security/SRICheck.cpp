@@ -22,6 +22,8 @@
 #include "nsNetUtil.h"
 #include "nsWhitespaceTokenizer.h"
 
+#define SRIVERBOSE(args)                                                       \
+  MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Verbose, args)
 #define SRILOG(args)                                                           \
   MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug, args)
 #define SRIERROR(args)                                                         \
@@ -388,10 +390,45 @@ SRICheckDataVerifier::Verify(const SRIMetadata& aMetadata,
   return NS_ERROR_SRI_CORRUPT;
 }
 
-size_t
+uint32_t
 SRICheckDataVerifier::SerializedHashLength()
 {
   return sizeof(mHashType) + sizeof(mHashLength) + mHashLength;
+}
+
+uint32_t
+SRICheckDataVerifier::UnknownSerializedHashLength()
+{
+  return sizeof(int8_t) + sizeof(uint32_t);
+}
+
+nsresult
+SRICheckDataVerifier::HashLength(uint32_t aDataLen, const uint8_t* aData, uint32_t* length)
+{
+  *length = 0;
+  NS_ENSURE_ARG_POINTER(aData);
+
+  // we expect to always encode an SRI, even if it is empty or incomplete
+  if (aDataLen < UnknownSerializedHashLength()) {
+    SRILOG(("SRICheckDataVerifier::HashLength, encoded length[%u] is too small", aDataLen));
+    return NS_ERROR_SRI_CORRUPT;
+  }
+
+  // decode the content of the buffer
+  size_t offset = sizeof(mHashType);
+  size_t len = *reinterpret_cast<const decltype(mHashLength)*>(&aData[offset]);
+  offset += sizeof(mHashLength);
+
+  SRIVERBOSE(("SRICheckDataVerifier::HashLength, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+  
+  if (offset + len > aDataLen) {
+    SRILOG(("SRICheckDataVerifier::HashLength, encoded length[%u] overflow the buffer size", aDataLen));
+    SRIVERBOSE(("SRICheckDataVerifier::HashLength, offset[%u], len[%u]", uint32_t(offset), uint32_t(len)));
+    return NS_ERROR_SRI_CORRUPT;
+  }
+  *length = uint32_t(offset + len);
+  return NS_OK;
 }
 
 nsresult
@@ -405,10 +442,13 @@ SRICheckDataVerifier::DeserializeVerifiedHash(uint32_t aDataLen, const uint8_t* 
 
   // we expect to always encode an SRI, even if it is empty or incomplete
   if (aDataLen < SerializedHashLength()) {
-    SRILOG(("SRICheckDataVerifier::DecodeHash, encoded length[%u] is not small", aDataLen));
+    SRILOG(("SRICheckDataVerifier::DecodeHash, encoded length[%u] is too small", aDataLen));
     return NS_ERROR_SRI_CORRUPT;
   }
 
+  SRIVERBOSE(("SRICheckDataVerifier::DecodeHash, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+  
   // decode the content of the buffer
   size_t offset = 0;
   if (*reinterpret_cast<const decltype(mHashType)*>(&aData[offset]) != mHashType) {
@@ -441,16 +481,38 @@ SRICheckDataVerifier::SerializeVerifiedHash(uint32_t aDataLen, uint8_t* aData)
   NS_ENSURE_ARG_POINTER(aData);
   NS_ENSURE_TRUE(aDataLen >= SerializedHashLength(), NS_ERROR_INVALID_ARG);
 
-  // decode the content of the buffer
+  // serialize the hash in the buffer
   size_t offset = 0;
   *reinterpret_cast<decltype(mHashType)*>(&aData[offset]) = mHashType;
   offset += sizeof(mHashType);
   *reinterpret_cast<decltype(mHashLength)*>(&aData[offset]) = mHashLength;
   offset += sizeof(mHashLength);
 
+  SRIVERBOSE(("SRICheckDataVerifier::SerializeVerifiedHash, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
   // copy the hash to mComputedHash, as-if we had finished streaming the bytes
   nsCharTraits<char>::copy(reinterpret_cast<char*>(&aData[offset]),
                            mComputedHash.get(), mHashLength);
+  return NS_OK;
+}
+
+nsresult
+SRICheckDataVerifier::SerializeUnknownHash(uint32_t aDataLen, uint8_t* aData)
+{
+  NS_ENSURE_ARG_POINTER(aData);
+  NS_ENSURE_TRUE(aDataLen >= UnknownSerializedHashLength(), NS_ERROR_INVALID_ARG);
+
+  // serialize an unknown hash in the buffer, to be able to skip it later
+  size_t offset = 0;
+  *reinterpret_cast<decltype(mHashType)*>(&aData[offset]) = 0;
+  offset += sizeof(mHashType);
+  *reinterpret_cast<decltype(mHashLength)*>(&aData[offset]) = 0;
+  offset += sizeof(mHashLength);
+
+  SRIVERBOSE(("SRICheckDataVerifier::SerializeUnknownHash, header {%x, %x, %x, %x, %x, ...}",
+              aData[0], aData[1], aData[2], aData[3], aData[4]));
+
   return NS_OK;
 }
 

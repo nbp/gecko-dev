@@ -5711,7 +5711,7 @@ class MOZ_RAII AutoHideScriptedCaller
  * Encode/Decode interpreted scripts and functions to/from memory.
  */
 
-typedef mozilla::Vector<uint8_t, 0, js::SystemAllocPolicy> TranscodeBuffer;
+typedef mozilla::Vector<uint8_t> TranscodeBuffer;
 
 enum TranscodeResult
 {

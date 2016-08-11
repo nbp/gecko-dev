@@ -63,7 +63,9 @@ class SRICheckDataVerifier final
     }
 
     // Return the length of the serialized hash.
-    size_t SerializedHashLength();
+    uint32_t SerializedHashLength();
+    static uint32_t UnknownSerializedHashLength();
+    static nsresult HashLength(uint32_t aDataLen, const uint8_t* aData, uint32_t* length);
 
     // Read the computed hash from a cache. The array should be at least the
     // same size or larger than the value returned by SerializedHashLength.
@@ -75,6 +77,7 @@ class SRICheckDataVerifier final
     // Write the computed hash in a buffer which is at least the size returned
     // by SerializedHashLength.
     nsresult SerializeVerifiedHash(uint32_t aDataLen, uint8_t* aData);
+    static nsresult SerializeUnknownHash(uint32_t aDataLen, uint8_t* aData);
 
   private:
     nsCOMPtr<nsICryptoHash> mCryptoHash;

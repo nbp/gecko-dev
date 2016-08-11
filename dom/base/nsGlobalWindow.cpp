@@ -2545,6 +2545,11 @@ CreateNativeGlobalForInner(JSContext* aCx,
 
   JS::CompartmentOptions options;
 
+  // This option make the interpret clone the object literals, such that the
+  // bytecode cache instrumentation of the ScriptLoader can save the immutable
+  // object literal as part of bytecode cache.
+  options.creationOptions().setCloneSingletons(true);
+
   // Sometimes add-ons load their own XUL windows, either as separate top-level
   // windows or inside a browser element. In such cases we want to tag the
   // window's compartment with the add-on ID. See bug 1092156.
@@ -12296,9 +12301,10 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     options.setFileAndLine(filename, lineNo)
            .setVersion(JSVERSION_DEFAULT);
     JS::Rooted<JSObject*> global(aes.cx(), FastGetGlobalJSObject());
+    JS::Rooted<JSScript*> jsScript(aes.cx());
     nsresult rv =
       nsJSUtils::EvaluateString(aes.cx(), nsDependentString(script),
-                                global, options);
+                                global, &jsScript, options);
     if (rv == NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW_UNCATCHABLE) {
       abortIntervalHandler = true;
     }

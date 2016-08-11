@@ -56,6 +56,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/unused.h"
 #include "nsIScriptError.h"
+#include "nsIOutputStream.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -63,6 +64,17 @@ using namespace mozilla::dom;
 using JS::SourceBufferHolder;
 
 static LazyLogModule gCspPRLog("CSP");
+static LazyLogModule gScriptLoaderLog("ScriptLoader");
+
+#define SLVERBOSE(args)                                                       \
+  MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Verbose, args)
+#define SLLOG(args)                                                           \
+  MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Debug, args)
+#define SLWARN(args)                                                          \
+  MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Warning, args)
+#define SLERROR(args)                                                         \
+  MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Error, args)
+
 
 void
 ImplCycleCollectionUnlink(nsScriptLoadRequestList& aField);
@@ -1058,6 +1070,9 @@ nsresult
 nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
 {
   MOZ_ASSERT(aRequest->IsLoading());
+  aRequest->mDataType = nsScriptLoadRequest::DataType::Unknown;
+  aRequest->mScriptText.clearAndFree();
+  aRequest->mScriptBytecode.clearAndFree();
 
   // If this document is sandboxed without 'allow-scripts', abort.
   if (mDocument->HasScriptsBlockedBySandbox()) {
@@ -1123,11 +1138,14 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
 
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Inform the HTTP cache that we prefer to have information coming from the
-  // bytecode cache instead of the sources, if such entry is already registered.
-  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-  if (cic) {
-    cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
+  aRequest->mCacheInfo = nullptr;
+  if (!aRequest->IsLoadingSource()) {
+    // Inform the HTTP cache that we prefer to have information coming from the
+    // bytecode cache instead of the sources, if such entry is already registered.
+    nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
+    if (cic) {
+      cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
+    }
   }
 
   // Register if this request should prevent loading any other resources from
@@ -1734,6 +1752,9 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
   }
 
   mDocument->BlockOnload();
+
+  // Once the compilation is finished, an event would be added to the event loop
+  // to call nsScriptLoader::ProcessOffThreadRequest with the same request.
   aRequest->mProgress = nsScriptLoadRequest::Progress::Compiling;
 
   Unused << runnable.forget();
@@ -1871,6 +1892,7 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
 
   // Free any source data.
   aRequest->mScriptText.clearAndFree();
+  // Note: Do not free the bytecode here, as we might have to save it later.
 
   return rv;
 }
@@ -2022,6 +2044,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
     }
 
     if (aRequest->IsModuleRequest()) {
+      MOZ_ASSERT(aRequest->IsSource());
       rv = EnsureModuleResolveHook(aes.cx());
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2033,16 +2056,74 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
       MOZ_ASSERT(module);
       rv = nsJSUtils::ModuleDeclarationInstantiation(aes.cx(), module);
       if (NS_SUCCEEDED(rv)) {
+        SLLOG(("ScriptLoadRequest (%p): Evaluate Module", aRequest));
         rv = nsJSUtils::ModuleEvaluation(aes.cx(), module);
       }
     } else {
       JS::CompileOptions options(aes.cx());
       FillCompileOptionsForRequest(aes, aRequest, global, &options);
 
-      nsAutoString inlineData;
-      SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
-      rv = nsJSUtils::EvaluateString(aes.cx(), srcBuf, global, options,
-                                     aRequest->OffThreadTokenPtr());
+      if (aRequest->IsBytecode()) {
+        SLLOG(("ScriptLoadRequest (%p): Evaluate Bytecode", aRequest));
+        rv = nsJSUtils::EvaluateBytecode(aes.cx(), aRequest->mScriptBytecode,
+                                         aRequest->mBytecodeOffset, global, options);
+      } else {
+        MOZ_ASSERT(aRequest->IsSource() /* TODO: remove --> */ || aRequest->IsUnknownDataType());
+        nsAutoString inlineData;
+        SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
+        JS::Rooted<JSScript*> script(aes.cx());
+        SLLOG(("ScriptLoadRequest (%p): Evaluate Source", aRequest));
+        rv = nsJSUtils::EvaluateString(aes.cx(), srcBuf, global, &script, options,
+                                       aRequest->OffThreadTokenPtr());
+
+        SLLOG(("ScriptLoadRequest (%p): Evaluate Source", aRequest));
+
+        // singletonsAsTemplates is used to verify that the current compartment
+        // can be used for encoding object literals in the bytecode cache,
+        // otherwise, object literals are mutable and we cannot safely encode
+        // them as we would encode the mutated state.
+        if (NS_SUCCEEDED(rv) && script && aRequest->mCacheInfo &&
+            JS::CompartmentBehaviorsRef(global).getSingletonsAsTemplates())
+        {
+          // Open the output stream to the cache entry alternate data
+          // storage. This might fail if the stream is already open by another
+          // request, in which case, we just ignore the current one.
+          nsCOMPtr<nsIOutputStream> output;
+          rv = aRequest->mCacheInfo->OpenAlternativeOutputStream(NS_LITERAL_CSTRING("javascript/moz-bytecode"),
+                                                                 getter_AddRefs(output));
+          aRequest->mCacheInfo = nullptr;
+          if (NS_SUCCEEDED(rv) && output) {
+            SLVERBOSE(("ScriptLoadRequest (%p): Encode script (existing length = %u)",
+                       aRequest, unsigned(aRequest->mScriptBytecode.length())));
+            // Append the bytecode in the bytecode buffer, which already contains SRI hashes.
+            JS::TranscodeResult tr = JS::EncodeScript(aes.cx(), aRequest->mScriptBytecode, script);
+            if (tr == JS::TranscodeResult_Ok) {
+              // if length > 2^32 then skip
+              uint32_t n;
+              rv = output->Write(reinterpret_cast<char*>(aRequest->mScriptBytecode.begin()),
+                                 aRequest->mScriptBytecode.length(), &n);
+              SLLOG(("ScriptLoadRequest (%p): Write bytecode cache (length = %u, written = %u)",
+                     aRequest, unsigned(aRequest->mScriptBytecode.length()), n));
+              if (NS_SUCCEEDED(rv))
+                rv = output->Close();
+              rv = NS_OK;
+            } else {
+              // TODO: Ignore failures to encode script, but we might want to log that.
+              SLWARN(("ScriptLoadRequest (%p): Cannot encode bytecode", aRequest));
+            }
+          } else {
+            SLLOG(("ScriptLoadRequest (%p): Cannot open bytecode cache (rv = %X, output = %p)",
+                   aRequest, rv, output.get()));
+          }
+        } else {
+          SLLOG(("ScriptLoadRequest (%p): Cannot cache anything (rv = %X, script = %p, cacheInfo = %p, singleton = %s)",
+                 aRequest, rv, script.get(), aRequest->mCacheInfo.get(),
+                 JS::CompartmentBehaviorsRef(global).getSingletonsAsTemplates() ? "true" : "false"));
+          rv = NS_OK;
+        }
+        aRequest->mScriptBytecode.clearAndFree();
+        aRequest->mCacheInfo = nullptr;
+      }
     }
   }
 
@@ -2359,6 +2440,44 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     }
   }
 
+  // We have an empty or verified SRI, and we were loading from the sources. Let
+  // us save this hash in case we save the bytecode of this script in the cache.
+  if (NS_SUCCEEDED(rv) && aRequest->IsSource()) {
+    MOZ_ASSERT(aRequest->mScriptBytecode.empty());
+    if (!aRequest->mIntegrity.IsEmpty()) {
+      MOZ_ASSERT(aSRIDataVerifier);
+      // Encode the SRI computed hash.
+      uint32_t len = aSRIDataVerifier->SerializedHashLength();
+      if (!aRequest->mScriptBytecode.growBy(len)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      aRequest->mBytecodeOffset = len;
+
+      DebugOnly<nsresult> res = aSRIDataVerifier->SerializeVerifiedHash(
+        aRequest->mScriptBytecode.length(),
+        aRequest->mScriptBytecode.begin());
+      MOZ_ASSERT(NS_SUCCEEDED(res));
+    } else {
+      MOZ_ASSERT(!aSRIDataVerifier);
+      // Encode a dummy SRI hash, in case another request expects one.
+      uint32_t len = SRICheckDataVerifier::UnknownSerializedHashLength();
+      if (!aRequest->mScriptBytecode.growBy(len)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      aRequest->mBytecodeOffset = len;
+
+      DebugOnly<nsresult> res = SRICheckDataVerifier::SerializeUnknownHash(
+        aRequest->mScriptBytecode.length(),
+        aRequest->mScriptBytecode.begin());
+      MOZ_ASSERT(NS_SUCCEEDED(res));
+      mozilla::DebugOnly<uint32_t> srilen;
+      MOZ_ASSERT(NS_SUCCEEDED(SRICheckDataVerifier::HashLength(aRequest->mScriptBytecode.length(),
+                                                               aRequest->mScriptBytecode.begin(),
+                                                               &srilen)));
+      MOZ_ASSERT(srilen == aRequest->mScriptBytecode.length());
+    }
+  }
+
   if (NS_SUCCEEDED(rv)) {
     rv = PrepareLoadedRequest(aRequest, aLoader, aChannelStatus);
   }
@@ -2475,6 +2594,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   if (aRequest->IsCanceled()) {
     return NS_BINDING_ABORTED;
   }
+  MOZ_ASSERT(aRequest->IsLoading());
 
   // If we don't have a document, then we need to abort further
   // evaluation.
@@ -2530,6 +2650,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                "aRequest should be pending!");
 
   if (aRequest->IsModuleRequest()) {
+    MOZ_ASSERT(aRequest->IsSource());
     nsModuleLoadRequest* request = aRequest->AsModuleRequest();
 
     // When loading a module, only responses with a JavaScript MIME type are
@@ -2558,7 +2679,9 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   aRequest->SetReady();
 
   // If this is currently blocking the parser, attempt to compile it off-main-thread.
-  if (aRequest == mParserBlockingRequest && (NumberOfProcessors() > 1)) {
+  if (aRequest->IsSource() && aRequest == mParserBlockingRequest &&
+      (NumberOfProcessors() > 1))
+  {
     MOZ_ASSERT(!aRequest->IsModuleRequest());
     nsresult rv = AttemptAsyncScriptCompile(aRequest);
     if (rv == NS_OK) {
@@ -2686,10 +2809,14 @@ nsScriptLoadHandler::nsScriptLoadHandler(nsScriptLoader *aScriptLoader,
     mRequest(aRequest),
     mSRIDataVerifier(aSRIDataVerifier),
     mSRIStatus(NS_OK),
-    mDataType(DataType::Unknown),
     mDecoder(),
-    mBuffer(aRequest->mScriptText)
-{}
+    mBuffer(aRequest->mScriptText),
+    mBytecodeBuffer(aRequest->mScriptBytecode)
+{
+  MOZ_ASSERT(mRequest->IsUnknownDataType());
+  if (mRequest->IsLoadingSource())
+    mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
+}
 
 nsScriptLoadHandler::~nsScriptLoadHandler()
 {}
@@ -2710,12 +2837,12 @@ nsScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
   }
 
   nsresult rv = NS_OK;
-  if (mDataType == DataType::Unknown) {
+  if (mRequest->IsUnknownDataType()) {
     rv = EnsureKnownDataType(aLoader);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  if (mDataType == DataType::Source) {
+  if (mRequest->IsSource()) {
     if (!EnsureDecoder(aLoader, aData, aDataLength,
                        /* aEndOfStream = */ false)) {
       return NS_OK;
@@ -2734,8 +2861,13 @@ nsScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
       mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
     }
   } else {
-    MOZ_ASSERT(mDataType == DataType::Bytecode);
-    MOZ_CRASH("NYI: nsScriptLoadHandler::OnIncrementalData");
+    MOZ_ASSERT(mRequest->IsBytecode());
+    if (!mBytecodeBuffer.append(aData, aDataLength)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    *aConsumedLength = aDataLength;
+    rv = MaybeDecodeSRI();
   }
 
   return rv;
@@ -2859,32 +2991,63 @@ nsScriptLoadHandler::EnsureDecoder(nsIIncrementalStreamLoader *aLoader,
 }
 
 nsresult
+nsScriptLoadHandler::MaybeDecodeSRI()
+{
+  if (!mSRIDataVerifier || NS_FAILED(mSRIStatus) || mSRIDataVerifier->IsComplete())
+    return NS_OK;
+
+  if (mBytecodeBuffer.length() <= mSRIDataVerifier->SerializedHashLength())
+    return NS_OK;
+
+  mSRIStatus = mSRIDataVerifier->DeserializeVerifiedHash(
+    mBytecodeBuffer.length(), mBytecodeBuffer.begin());
+
+  if (NS_FAILED(mSRIStatus)) {
+    // We are unable to decode the hash contained in the alternate data which
+    // contains the bytecode, or it does not use the same algorithm.
+    MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Debug,
+            ("nsScriptLoadHandler::OnIncrementalData, failed to decode SRI, restart request"));
+
+    // Start a new channel from which we explicitly request to stream the source
+    // instead of the bytecode.
+    mRequest->mProgress = nsScriptLoadRequest::Progress::Loading_Source;
+    nsresult rv = mScriptLoader->StartLoad(mRequest);
+    if (NS_FAILED(rv))
+      return rv;
+
+    // Close the current channel and this ScriptLoadHandler as we created a new
+    // one for the same request.
+    return NS_ERROR_ABORT;
+  }
+
+  mRequest->mBytecodeOffset = mSRIDataVerifier->SerializedHashLength();
+  return NS_OK;
+}
+
+nsresult
 nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
 {
-  MOZ_ASSERT(mDataType == DataType::Unknown);
+  MOZ_ASSERT(mRequest->IsUnknownDataType());
+  MOZ_ASSERT(mRequest->mProgress == nsScriptLoadRequest::Progress::Loading);
   nsCOMPtr<nsIRequest> req;
   nsresult rv = aLoader->GetRequest(getter_AddRefs(req));
   NS_ASSERTION(req, "StreamLoader's request went away prematurely");
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIChannel> channel = do_QueryInterface(req);
-  if (!channel) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
+  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(req));
   if (cic) {
     nsAutoCString altDataType;
     cic->GetAlternativeDataType(altDataType);
     if (altDataType.EqualsLiteral("javascript/moz-bytecode")) {
-      mDataType = DataType::Bytecode;
+      mRequest->mDataType = nsScriptLoadRequest::DataType::Bytecode;
     } else {
-      mDataType = DataType::Source;
+      mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
     }
   } else {
-    mDataType = DataType::Source;
+    mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
   }
-  MOZ_ASSERT(mDataType != DataType::Unknown);
+  MOZ_ASSERT(!mRequest->IsUnknownDataType());
+  MOZ_ASSERT(mRequest->IsLoading());
   return NS_OK;
 }
 
@@ -2895,31 +3058,64 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                       uint32_t aDataLength,
                                       const uint8_t* aData)
 {
+  nsresult rv = NS_OK;
+  nsAutoCString url;
+  mRequest->mURI->GetAsciiSpec(url);
+  SLLOG(("ScriptLoadRequest (%p): Stream complete (url = %s)",
+        mRequest.get(), url.get()));
   if (!mRequest->IsCanceled()) {
-    if (mDataType == DataType::Unknown) {
-      nsresult rv = EnsureKnownDataType(aLoader);
+    if (mRequest->IsUnknownDataType()) {
+      rv = EnsureKnownDataType(aLoader);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
-    if (mDataType == DataType::Source) {
+    if (mRequest->IsSource()) {
       DebugOnly<bool> encoderSet =
         EnsureDecoder(aLoader, aData, aDataLength, /* aEndOfStream = */ true);
       MOZ_ASSERT(encoderSet);
-      DebugOnly<nsresult> rv = DecodeRawData(aData, aDataLength,
-                                             /* aEndOfStream = */ true);
+      rv = DecodeRawData(aData, aDataLength, /* aEndOfStream = */ true);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      SLLOG(("ScriptLoadRequest (%p): Source length = %u",
+             mRequest.get(), unsigned(mBuffer.length())));
 
       // If SRI is required for this load, appending new bytes to the hash.
       if (mSRIDataVerifier && NS_SUCCEEDED(mSRIStatus)) {
         mSRIStatus = mSRIDataVerifier->Update(aDataLength, aData);
       }
     } else {
-      MOZ_ASSERT(mDataType == DataType::Bytecode);
-      MOZ_CRASH("NYI: nsScriptLoadHandler::OnStreamComplete");
-      // TODO: Push bytes, and fill SRI data.
+      MOZ_ASSERT(mRequest->IsBytecode());
+      if (!mBytecodeBuffer.append(aData, aDataLength)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+
+      SLLOG(("ScriptLoadRequest (%p): Bytecode length = %u",
+             mRequest.get(), unsigned(mBytecodeBuffer.length())));
+
+      rv = MaybeDecodeSRI();
+      // If we abort while decoding the SRI, we fallback on explictly requesting
+      // the source. Thus, we should not continue in
+      // nsScriptLoader::OnStreamComplete, which removes the request from the
+      // waiting lists.
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      // Record the offset at which the bytecode starts.
+      rv = SRICheckDataVerifier::HashLength(mBytecodeBuffer.length(),
+                                            mBytecodeBuffer.begin(),
+                                            &mRequest->mBytecodeOffset);
+      NS_ENSURE_SUCCESS(rv, rv);
     }
   }
 
   // we have to mediate and use mRequest.
-  return mScriptLoader->OnStreamComplete(aLoader, mRequest, aStatus, mSRIStatus,
-                                         mSRIDataVerifier);
+  rv = mScriptLoader->OnStreamComplete(aLoader, mRequest, aStatus, mSRIStatus,
+                                       mSRIDataVerifier);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Everything went well, keep the CacheInfoChannel alive such that we can
+  // later save the bytecode on the cache entry.
+  nsCOMPtr<nsIRequest> channelRequest;
+  aLoader->GetRequest(getter_AddRefs(channelRequest));
+  mRequest->mCacheInfo = do_QueryInterface(channelRequest);
+  return rv;
 }

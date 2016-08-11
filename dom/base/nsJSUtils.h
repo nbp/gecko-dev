@@ -80,6 +80,7 @@ public:
   static nsresult EvaluateString(JSContext* aCx,
                                  const nsAString& aScript,
                                  JS::Handle<JSObject*> aEvaluationGlobal,
+                                 JS::MutableHandle<JSScript*> aScriptHandle,
                                  JS::CompileOptions &aCompileOptions,
                                  const EvaluateOptions& aEvaluateOptions,
                                  JS::MutableHandle<JS::Value> aRetValue);
@@ -87,6 +88,7 @@ public:
   static nsresult EvaluateString(JSContext* aCx,
                                  JS::SourceBufferHolder& aSrcBuf,
                                  JS::Handle<JSObject*> aEvaluationGlobal,
+                                 JS::MutableHandle<JSScript*> aScriptHandle,
                                  JS::CompileOptions &aCompileOptions,
                                  const EvaluateOptions& aEvaluateOptions,
                                  JS::MutableHandle<JS::Value> aRetValue);
@@ -95,13 +97,21 @@ public:
   static nsresult EvaluateString(JSContext* aCx,
                                  const nsAString& aScript,
                                  JS::Handle<JSObject*> aEvaluationGlobal,
+                                 JS::MutableHandle<JSScript*> aScriptHandle,
                                  JS::CompileOptions &aCompileOptions);
 
   static nsresult EvaluateString(JSContext* aCx,
                                  JS::SourceBufferHolder& aSrcBuf,
                                  JS::Handle<JSObject*> aEvaluationGlobal,
+                                 JS::MutableHandle<JSScript*> aScriptHandle,
                                  JS::CompileOptions &aCompileOptions,
                                  void **aOffThreadToken);
+
+  static nsresult EvaluateBytecode(JSContext* aCx,
+                                   mozilla::Vector<uint8_t>& aBytecodeBuf,
+                                   size_t aBytecodeIndex,
+                                   JS::Handle<JSObject*> aEvaluationGlobal,
+                                   JS::CompileOptions &aCompileOptions);
 
   static nsresult CompileModule(JSContext* aCx,
                                 JS::SourceBufferHolder& aSrcBuf,
@@ -128,6 +138,7 @@ private:
   static nsresult EvaluateString(JSContext* aCx,
                                  JS::SourceBufferHolder& aSrcBuf,
                                  JS::Handle<JSObject*> aEvaluationGlobal,
+                                 JS::MutableHandle<JSScript*> aScriptHandle,
                                  JS::CompileOptions& aCompileOptions,
                                  const EvaluateOptions& aEvaluateOptions,
                                  JS::MutableHandle<JS::Value> aRetValue,

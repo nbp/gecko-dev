@@ -268,8 +268,9 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     options.setFileAndLine(mURL.get(), 1)
            .setVersion(JSVERSION_DEFAULT);
     nsJSUtils::EvaluateOptions evalOptions(cx);
+    JS::Rooted<JSScript*> jsScript(cx);
     rv = nsJSUtils::EvaluateString(cx, NS_ConvertUTF8toUTF16(script),
-                                   globalJSObject, options, evalOptions, &v);
+                                   globalJSObject, &jsScript, options, evalOptions, &v);
 
     if (NS_FAILED(rv)) {
         return NS_ERROR_MALFORMED_URI;

@@ -1428,7 +1428,8 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
     return false;
   }
   obj = js::GetGlobalForObjectCrossCompartment(obj);
-  nsresult rv = nsJSUtils::EvaluateString(cx, utf16script, obj, options,
+  JS::Rooted<JSScript*> jsScript(cx);
+  nsresult rv = nsJSUtils::EvaluateString(cx, utf16script, obj, &jsScript, options,
                                           evalOptions, &rval);
 
   return NS_SUCCEEDED(rv) &&

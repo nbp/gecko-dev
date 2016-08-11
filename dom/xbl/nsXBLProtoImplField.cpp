@@ -429,9 +429,10 @@ nsXBLProtoImplField::InstallField(JS::Handle<JSObject*> aBoundNode,
                                           evalOptions.scopeChain)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
+  JS::Rooted<JSScript*> script(cx);
   rv = nsJSUtils::EvaluateString(cx, nsDependentString(mFieldText,
                                                        mFieldTextLength),
-                                 scopeObject, options, evalOptions, &result);
+                                 scopeObject, &script, options, evalOptions, &result);
   if (NS_FAILED(rv)) {
     return rv;
   }

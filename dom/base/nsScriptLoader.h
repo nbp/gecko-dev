@@ -19,6 +19,7 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
+#include "nsICacheInfoChannel.h"
 #include "nsIDocument.h"
 #include "nsIIncrementalStreamLoader.h"
 #include "nsURIHashKey.h"
@@ -75,6 +76,7 @@ public:
     : mKind(aKind),
       mElement(aElement),
       mProgress(Progress::Loading),
+      mDataType(DataType::Unknown),
       mIsInline(true),
       mHasSourceMapURL(false),
       mIsDefer(false),
@@ -85,6 +87,8 @@ public:
       mWasCompiledOMT(false),
       mOffThreadToken(nullptr),
       mScriptText(),
+      mScriptBytecode(),
+      mBytecodeOffset(0),
       mJSVersion(aVersion),
       mLineNo(1),
       mCORSMode(aCORSMode),
@@ -131,21 +135,44 @@ public:
     return mOffThreadToken ?  &mOffThreadToken : nullptr;
   }
 
-  enum class Progress {
-    Loading,
+  enum class Progress : uint8_t {
+    Loading,        // Request either source or bytecode
+    Loading_Source, // Explicitly Request source stream
     Compiling,
     FetchingImports,
     Ready
   };
+
   bool IsReadyToRun() const {
     return mProgress == Progress::Ready;
   }
   bool IsLoading() const {
-    return mProgress == Progress::Loading;
+    return mProgress == Progress::Loading ||
+      mProgress == Progress::Loading_Source;
+  }
+  bool IsLoadingSource() const {
+    return mProgress == Progress::Loading_Source;
   }
   bool InCompilingStage() const {
     return mProgress == Progress::Compiling ||
            (IsReadyToRun() && mWasCompiledOMT);
+  }
+
+  // Type of data provided by the nsChannel.
+  enum class DataType : uint8_t {
+    Unknown,
+    Source,
+    Bytecode
+  };
+
+  bool IsUnknownDataType() const {
+    return mDataType == DataType::Unknown;
+  }
+  bool IsSource() const {
+    return mDataType == DataType::Source;
+  }
+  bool IsBytecode() const {
+    return mDataType == DataType::Bytecode;
   }
 
   void MaybeCancelOffThreadScript();
@@ -156,6 +183,7 @@ public:
   const nsScriptKind mKind;
   nsCOMPtr<nsIScriptElement> mElement;
   Progress mProgress;     // Are we still waiting for a load to complete?
+  DataType mDataType;     // Does this contain Source or Bytecode?
   bool mIsInline;         // Is the script inline or loaded?
   bool mHasSourceMapURL;  // Does the HTTP header have a source map url?
   bool mIsDefer;          // True if we live in mDeferRequests.
@@ -166,10 +194,25 @@ public:
   bool mWasCompiledOMT;   // True if the script has been compiled off main thread.
   void* mOffThreadToken;  // Off-thread parsing token.
   nsString mSourceMapURL; // Holds source map url for loaded scripts
+
   // Holds script text for non-inline scripts. Don't use nsString so we can give
   // ownership to jsapi.
   mozilla::Vector<char16_t> mScriptText;
+
+  // Holds the SRI serialized hash and the script bytecode for non-inline
+  // scripts.
+  mozilla::Vector<uint8_t> mScriptBytecode;
+  uint32_t mBytecodeOffset; // Offset of the bytecode in mScriptBytecode
+
   uint32_t mJSVersion;
+
+  // Holds the Cache entry information, which is used to register the bytecode
+  // on the cache entry, such that we can load it the next time.
+  //
+  // Note, to avoid cycles throught the channel, we should not set this field
+  // until we finished streaming bytes from the channel.
+  nsCOMPtr<nsICacheInfoChannel> mCacheInfo;
+
   nsCOMPtr<nsIURI> mURI;
   nsCOMPtr<nsIPrincipal> mOriginPrincipal;
   nsAutoCString mURL;     // Keep the URI's filename alive during off thread parsing.
@@ -651,9 +694,6 @@ public:
 private:
   virtual ~nsScriptLoadHandler();
 
-  // Type of data provided by the nsChannel.
-  enum class DataType : uint8_t { Unknown, Source, Bytecode };
-
   /*
    * Once the charset is found by the EnsureDecoder function, we can
    * incrementally convert the charset to the one expected by the JS Parser.
@@ -670,6 +710,12 @@ private:
                      const uint8_t* aData, uint32_t aDataLength,
                      bool aEndOfStream);
 
+  /*
+   * When streaming bytecode, we have the opportunity to fallback early if SRI
+   * does not match the expectation of the document.
+   */
+  nsresult MaybeDecodeSRI();
+
   // Query the channel to find the data type associated with the input stream.
   nsresult EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader);
 
@@ -685,14 +731,14 @@ private:
   // Status of SRI data operations.
   nsresult                      mSRIStatus;
 
-  // Record the data type of the input.
-  DataType                      mDataType;
-
   // Unicode decoder for charset.
   nsCOMPtr<nsIUnicodeDecoder>   mDecoder;
 
   // Accumulated decoded char buffer.
   mozilla::Vector<char16_t>&    mBuffer;
+
+  // Accumulated bytecode byte buffer.
+  mozilla::Vector<uint8_t>&     mBytecodeBuffer;
 };
 
 class nsAutoScriptLoaderDisabler
