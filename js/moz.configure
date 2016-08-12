@@ -172,3 +172,16 @@ def vtune(value):
 
 set_config('MOZ_VTUNE', vtune)
 set_define('MOZ_VTUNE', vtune)
+
+# Just-In-Time Compiler options
+# =======================================================
+js_option('--enable-thm', default=True,
+          help='Enable Three Headed Monkey JIT')
+
+@depends('--enable-thm')
+def three_headed_monkey(value):
+    if value:
+        return True
+
+set_config('ENABLE_THM', three_headed_monkey)
+set_define('ENABLE_THM', three_headed_monkey)
