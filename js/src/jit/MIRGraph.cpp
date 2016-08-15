@@ -1095,6 +1095,19 @@ MBasicBlock::add(MInstruction* ins)
     graph().allocDefinitionId(ins);
     instructions_.pushBack(ins);
     ins->setTrackedSite(trackedSite_);
+
+#ifdef ENABLE_THM
+    // Register the current instruction in the opcode index.
+    size_t index = size_t(ins->op());
+    bool res = true;
+#define SUM_MIR_OPCODES_(Name) 1 +
+    if (graph().opcodesInstructions.length() == 0)
+        res = graph().opcodesInstructions.growBy(MIR_OPCODE_LIST(SUM_MIR_OPCODES_) 0);
+#undef SUM_MIR_OPCODES_
+    MOZ_ASSERT(res);
+    res = graph().opcodesInstructions[index].append(ins);
+    MOZ_ASSERT(res);
+#endif
 }
 
 void

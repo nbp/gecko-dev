@@ -10,6 +10,9 @@
 // This file declares the data structures used to build a control-flow graph
 // containing MIR.
 
+#include "mozilla/Array.h"
+#include "mozilla/Vector.h"
+
 #include "jit/FixedList.h"
 #include "jit/JitAllocPolicy.h"
 #include "jit/MIR.h"
@@ -744,6 +747,14 @@ class MIRGraph
     size_t phiFreeListLength_;
 
   public:
+#define SUM_MIR_OPCODES_(Name) 1 +
+    // Use the system allocator for the moment ... do not bother with the constructor of the Vector.
+    typedef mozilla::Vector<MInstruction*, 0, SystemAllocPolicy> InstructionVector;
+    // Note we cannot use an array as we need to set the allocator for the JitAllocPolicy
+    mozilla::Vector<InstructionVector, MIR_OPCODE_LIST(SUM_MIR_OPCODES_) 0, SystemAllocPolicy> opcodesInstructions;
+#undef SUM_MIR_OPCODES_
+
+  public:
     explicit MIRGraph(TempAllocator* alloc)
       : alloc_(alloc),
         returnAccumulator_(nullptr),
@@ -752,7 +763,8 @@ class MIRGraph
         osrBlock_(nullptr),
         numBlocks_(0),
         hasTryBlock_(false),
-        phiFreeListLength_(0)
+        phiFreeListLength_(0),
+        opcodesInstructions()
     { }
 
     TempAllocator& alloc() const {
