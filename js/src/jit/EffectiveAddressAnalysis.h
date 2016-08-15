@@ -19,11 +19,13 @@ class EffectiveAddressAnalysis
     MIRGenerator* mir_;
     MIRGraph& graph_;
 
+#ifndef ENABLE_THM
     template<typename MWasmMemoryAccessType>
     MOZ_MUST_USE bool tryAddDisplacement(MWasmMemoryAccessType* ins, int32_t o);
 
     template<typename MWasmMemoryAccessType>
     void analyzeAsmHeapAccess(MWasmMemoryAccessType* ins);
+#endif
 
   public:
     EffectiveAddressAnalysis(MIRGenerator* mir, MIRGraph& graph)
