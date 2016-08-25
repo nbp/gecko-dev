@@ -92,7 +92,8 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsScriptLoadRequest)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_0(nsScriptLoadRequest)
+NS_IMPL_CYCLE_COLLECTION(nsScriptLoadRequest,
+                         mCacheInfo)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsScriptLoadRequest)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsScriptLoadRequest)
@@ -2076,8 +2077,6 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
         rv = nsJSUtils::EvaluateString(aes.cx(), srcBuf, global, &script, options,
                                        aRequest->OffThreadTokenPtr());
 
-        SLLOG(("ScriptLoadRequest (%p): Evaluate Source", aRequest));
-
         // singletonsAsTemplates is used to verify that the current compartment
         // can be used for encoding object literals in the bytecode cache,
         // otherwise, object literals are mutable and we cannot safely encode
@@ -2091,10 +2090,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
           nsCOMPtr<nsIOutputStream> output;
           rv = aRequest->mCacheInfo->OpenAlternativeOutputStream(NS_LITERAL_CSTRING("javascript/moz-bytecode"),
                                                                  getter_AddRefs(output));
-          aRequest->mCacheInfo = nullptr;
           if (NS_SUCCEEDED(rv) && output) {
-            SLVERBOSE(("ScriptLoadRequest (%p): Encode script (existing length = %u)",
-                       aRequest, unsigned(aRequest->mScriptBytecode.length())));
             // Append the bytecode in the bytecode buffer, which already contains SRI hashes.
             JS::TranscodeResult tr = JS::EncodeScript(aes.cx(), aRequest->mScriptBytecode, script);
             if (tr == JS::TranscodeResult_Ok) {
@@ -2102,15 +2098,15 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
               uint32_t n;
               rv = output->Write(reinterpret_cast<char*>(aRequest->mScriptBytecode.begin()),
                                  aRequest->mScriptBytecode.length(), &n);
-              SLLOG(("ScriptLoadRequest (%p): Write bytecode cache (length = %u, written = %u)",
-                     aRequest, unsigned(aRequest->mScriptBytecode.length()), n));
-              if (NS_SUCCEEDED(rv))
-                rv = output->Close();
-              rv = NS_OK;
+              SLLOG(("ScriptLoadRequest (%p): Write bytecode cache (length = %u, written = %u, rv = %X)",
+                     aRequest, unsigned(aRequest->mScriptBytecode.length()), n, rv));
             } else {
               // TODO: Ignore failures to encode script, but we might want to log that.
               SLWARN(("ScriptLoadRequest (%p): Cannot encode bytecode", aRequest));
             }
+
+            rv = output->Close();
+            rv = NS_OK;
           } else {
             SLLOG(("ScriptLoadRequest (%p): Cannot open bytecode cache (rv = %X, output = %p)",
                    aRequest, rv, output.get()));
@@ -2121,10 +2117,12 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
                  JS::CompartmentBehaviorsRef(global).getSingletonsAsTemplates() ? "true" : "false"));
           rv = NS_OK;
         }
-        aRequest->mScriptBytecode.clearAndFree();
-        aRequest->mCacheInfo = nullptr;
       }
     }
+
+    // TODO: Move these as well as the bytecode saving to an idle-observer.
+    aRequest->mScriptBytecode.clearAndFree();
+    aRequest->mCacheInfo = nullptr;
   }
 
   context->SetProcessingScriptTag(oldProcessingScriptTag);
