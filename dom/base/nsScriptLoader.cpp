@@ -59,6 +59,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Unused.h"
 #include "nsIScriptError.h"
+#include "nsIOutputStream.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1301,11 +1302,13 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
   NS_ENSURE_SUCCESS(rv, rv);
 
   aRequest->mCacheInfo = nullptr;
+  LOG(("ScriptLoadRequest (%p): mProgress = %x", aRequest, aRequest->mProgress));
   if (!aRequest->IsLoadingSource()) {
     // Inform the HTTP cache that we prefer to have information coming from the
     // bytecode cache instead of the sources, if such entry is already registered.
     nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
     if (cic) {
+      LOG(("ScriptLoadRequest (%p): Maybe request bytecode", aRequest));
       cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
     }
   }
@@ -2275,12 +2278,88 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
       rv = FillCompileOptionsForRequest(aes, aRequest, global, &options);
 
       if (NS_SUCCEEDED(rv)) {
-        {
+        if (aRequest->IsBytecode()) {
+          LOG(("ScriptLoadRequest (%p): Decode Bytecode and Execute", aRequest));
           nsJSUtils::ExecutionContext exec(aes.cx(), global);
+          rv = exec.DecodeAndExec(options, aRequest->mScriptBytecode,
+                                  aRequest->mBytecodeOffset);
+        } else {
+          MOZ_ASSERT(aRequest->IsSource() /* TODO: remove --> */ || aRequest->IsUnknownDataType());
           if (aRequest->mOffThreadToken) {
+            // Off-main-thread parsing.
+            LOG(("ScriptLoadRequest (%p): Sync (off-thread parsing) and Execute",
+                 aRequest));
             JS::Rooted<JSScript*> script(aes.cx());
-            rv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
+            nsresult evalRv = NS_OK;
+            {
+              nsJSUtils::ExecutionContext exec(aes.cx(), global);
+              rv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
+              if (!aRequest->mCacheInfo) {
+                evalRv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
+              } else {
+                MOZ_ASSERT(aRequest->mBytecodeOffset ==
+                           aRequest->mScriptBytecode.length());
+                evalRv = SyncEncodeAndExec(&aRequest->mOffThreadToken,
+                                           aRequest->mScriptBytecode,
+                                           &script);
+              }
+            }
+
+            // Save the bytecode.
+            // TODO: Move that to a dedicated function, and to another thread.
+            do {
+              if (NS_FAILED(evalRv)) {
+                break;
+              }
+
+              if (!aRequest->mCacheInfo) {
+                LOG(("ScriptLoadRequest (%p): Cannot cache anything (rv = %X, script = %p, cacheInfo = %p)",
+                     aRequest, rv, script.get(), aRequest->mCacheInfo.get()));
+                break;
+              }
+
+              if (!JS::FinishIncrementalEncoding(aes.cx(), script)) {
+                LOG(("ScriptLoadRequest (%p): Cannot serialize bytecode",
+                     aRequest));
+                rv = evalRv;
+                break;
+              }
+
+              if (aRequest->mScriptBytecode.length() >= UINT32_MAX) {
+                LOG(("ScriptLoadRequest (%p): Bytecode cache is too large to be decoded correctly.",
+                     aRequest));
+                rv = evalRv;
+                break;
+              }
+
+              // Open the output stream to the cache entry alternate data
+              // storage. This might fail if the stream is already open by another
+              // request, in which case, we just ignore the current one.
+              nsCOMPtr<nsIOutputStream> output;
+              rv = aRequest->mCacheInfo->OpenAlternativeOutputStream(NS_LITERAL_CSTRING("javascript/moz-bytecode"),
+                                                                     getter_AddRefs(output));
+              if (NS_FAILED(rv) || !output) {
+                LOG(("ScriptLoadRequest (%p): Cannot open bytecode cache (rv = %X, output = %p)",
+                     aRequest, rv, output.get()));
+                break;
+              }
+
+              uint32_t n;
+              rv = output->Write(reinterpret_cast<char*>(aRequest->mScriptBytecode.begin()),
+                                 aRequest->mScriptBytecode.length(), &n);
+              LOG(("ScriptLoadRequest (%p): Write bytecode cache (rv = %X, length = %u, written = %u)",
+                   aRequest, rv, unsigned(aRequest->mScriptBytecode.length()), n));
+
+              rv = output->Close();
+              LOG(("ScriptLoadRequest (%p): Closing (rv = %X)",
+                   aRequest, rv));
+              rv = evalRv;
+            } while (false);
+
           } else {
+            // Main thread parsing (inline and small scripts)
+            LOG(("ScriptLoadRequest (%p): Compile And Exec", aRequest));
+            nsJSUtils::ExecutionContext exec(aes.cx(), global);
             nsAutoString inlineData;
             SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
             rv = exec.CompileAndExec(options, srcBuf);
@@ -2288,6 +2367,10 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
         }
       }
     }
+
+    // TODO: Move these as well as the bytecode saving to an idle-observer.
+    aRequest->mScriptBytecode.clearAndFree();
+    aRequest->mCacheInfo = nullptr;
   }
 
   context->SetProcessingScriptTag(oldProcessingScriptTag);
@@ -2588,6 +2671,45 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
         NS_ConvertUTF8toUTF16(violationURISpec),
         EmptyString(), lineNo, EmptyString(), EmptyString());
       rv = NS_ERROR_SRI_CORRUPT;
+    }
+  }
+
+  // We have an empty or verified SRI, and we were loading from the sources. Let
+  // us save this hash in case we save the bytecode of this script in the cache.
+  if (NS_SUCCEEDED(rv) && aRequest->IsSource()) {
+    MOZ_ASSERT(aRequest->mScriptBytecode.empty());
+    if (!aRequest->mIntegrity.IsEmpty()) {
+      MOZ_ASSERT(aSRIDataVerifier);
+      // Encode the SRI computed hash.
+      uint32_t len = aSRIDataVerifier->DataSummaryLength();
+      if (!aRequest->mScriptBytecode.growBy(len)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      aRequest->mBytecodeOffset = len;
+
+      DebugOnly<nsresult> res = aSRIDataVerifier->ExportDataSummary(
+        aRequest->mScriptBytecode.length(),
+        aRequest->mScriptBytecode.begin());
+      MOZ_ASSERT(NS_SUCCEEDED(res));
+    } else {
+      MOZ_ASSERT(!aSRIDataVerifier);
+      // Encode a dummy SRI hash, in case another request expects one.
+      uint32_t len = SRICheckDataVerifier::EmptyDataSummaryLength();
+      if (!aRequest->mScriptBytecode.growBy(len)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
+      aRequest->mBytecodeOffset = len;
+
+      DebugOnly<nsresult> res = SRICheckDataVerifier::ExportEmptyDataSummary(
+        aRequest->mScriptBytecode.length(),
+        aRequest->mScriptBytecode.begin());
+      MOZ_ASSERT(NS_SUCCEEDED(res));
+      mozilla::DebugOnly<uint32_t> srilen;
+      MOZ_ASSERT(NS_SUCCEEDED(SRICheckDataVerifier::DataSummaryLength(
+                                aRequest->mScriptBytecode.length(),
+                                aRequest->mScriptBytecode.begin(),
+                                &srilen)));
+      MOZ_ASSERT(srilen == aRequest->mScriptBytecode.length());
     }
   }
 
@@ -3257,5 +3379,7 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
   nsCOMPtr<nsIRequest> channelRequest;
   aLoader->GetRequest(getter_AddRefs(channelRequest));
   mRequest->mCacheInfo = do_QueryInterface(channelRequest);
+  LOG(("ScriptLoadRequest (%p): Query nsICacheInfoChannel = %p",
+       mRequest.get(), mRequest->mCacheInfo.get()));
   return rv;
 }

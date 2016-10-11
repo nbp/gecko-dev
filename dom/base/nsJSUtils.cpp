@@ -254,6 +254,7 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
                                            mozilla::Vector<uint8_t>& aBytecodeBuf,
                                            size_t aBytecodeIndex)
 {
+  MOZ_ASSERT(!mHasReturnValue);
   if (mSkip) {
     return mRv;
   }
@@ -264,14 +265,45 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
     // TODO: Handle logical failures in case where the version check is failing.
     mSkip = true;
     mRv = EvaluationExceptionToNSResult(mCx);
-    return;
+    return mRv;
   }
 
-  if (!JS_ExecuteScript(aCx, scopeChain, script)) {
+  if (!JS_ExecuteScript(mCx, scopeChain, script)) {
     mSkip = true;
     mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
   }
-  return rv;
+
+  return mRv;
+}
+
+nsresult
+nsJSUtils::ExecutionContext::SyncEncodeAndExec(void **aOffThreadToken,
+                                               mozilla::Vector<uint8_t>& aBytecodeBuf,
+                                               JS::MutableHandle<JSScript*> aScript)
+{
+  MOZ_ASSERT_IF(aOffThreadToken, !mHasReturnValue);
+  aScript.set(JS::FinishOffThreadScript(mCx, *aOffThreadToken));
+  *aOffThreadToken = nullptr; // Mark the token as having been finished.
+  if (!aScript) {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
+  }
+
+  if (!StartIncrementalEncoding(mCx, aBytecodeBuf, aScript)) {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
+  }
+
+  if (!JS_ExecuteScript(mCx, scopeChain, aScript)) {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
+  }
+
+  return mRv;
 }
 
 nsresult

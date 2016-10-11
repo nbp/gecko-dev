@@ -157,6 +157,12 @@ public:
     MOZ_MUST_USE nsresult DecodeAndExec(JS::CompileOptions& aCompileOptions,
                                         mozilla::Vector<uint8_t>& aBytecodeBuf,
                                         size_t aBytecodeIndex);
+
+    // Similar to SyncAndExec, except that in addition to fecth the source, we
+    // register the fact that we plan to encode its bytecode later.
+    MOZ_MUST_USE nsresult SyncEncodeAndExec(void **aOffThreadToken,
+                                            mozilla::Vector<uint8_t>& aBytecodeBuf,
+                                            JS::MutableHandle<JSScript*> aScript);
   };
 
   static nsresult CompileModule(JSContext* aCx,
