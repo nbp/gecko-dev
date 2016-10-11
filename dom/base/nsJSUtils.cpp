@@ -250,6 +250,31 @@ nsJSUtils::ExecutionContext::CompileAndExec(JS::CompileOptions& aCompileOptions,
 }
 
 nsresult
+nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
+                                           mozilla::Vector<uint8_t>& aBytecodeBuf,
+                                           size_t aBytecodeIndex)
+{
+  if (mSkip) {
+    return mRv;
+  }
+
+  JS::Rooted<JSScript*> script(mCx);
+  JS::TranscodeResult tr = JS::DecodeScript(mCx, aBytecodeBuf, &script, aBytecodeIndex);
+  if (tr != JS::TranscodeResult_Ok) {
+    // TODO: Handle logical failures in case where the version check is failing.
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return;
+  }
+
+  if (!JS_ExecuteScript(aCx, scopeChain, script)) {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+  }
+  return rv;
+}
+
+nsresult
 nsJSUtils::ExecutionContext::ExtractReturnValue(JS::MutableHandle<JS::Value> aRetValue)
 {
   MOZ_ASSERT(aRetValue.isUndefined());

@@ -152,6 +152,11 @@ public:
     // Compile a script contained in a string, and execute it.
     nsresult CompileAndExec(JS::CompileOptions& aCompileOptions,
                             const nsAString& aScript);
+
+    // Decode a script contained in a buffer, and execute it.
+    MOZ_MUST_USE nsresult DecodeAndExec(JS::CompileOptions& aCompileOptions,
+                                        mozilla::Vector<uint8_t>& aBytecodeBuf,
+                                        size_t aBytecodeIndex);
   };
 
   static nsresult CompileModule(JSContext* aCx,
