@@ -3367,6 +3367,8 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
                                                    &mRequest->mBytecodeOffset);
       NS_ENSURE_SUCCESS(rv, mScriptLoader->RestartLoad(mRequest));
     }
+
+    MOZ_ASSERT(!mRequest->IsUnknownDataType());
   }
 
   // we have to mediate and use mRequest.
