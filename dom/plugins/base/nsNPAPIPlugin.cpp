@@ -1370,14 +1370,27 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
   options.setFileAndLine(spec, 0)
          .setVersion(JSVERSION_DEFAULT);
   JS::Rooted<JS::Value> rval(cx);
-  nsJSUtils::EvaluateOptions evalOptions(cx);
+  JS::AutoObjectVector scopeChain(cx);
   if (obj != js::GetGlobalForObjectCrossCompartment(obj) &&
-      !evalOptions.scopeChain.append(obj)) {
+      !scopeChain.append(obj)) {
     return false;
   }
   obj = js::GetGlobalForObjectCrossCompartment(obj);
-  nsresult rv = nsJSUtils::EvaluateString(cx, utf16script, obj, options,
-                                          evalOptions, &rval);
+  nsresult rv = NS_OK;
+  {
+    nsJSUtils::ExecutionContext exec(cx, obj);
+    exec.SetReturnValue(options)
+        .SetScopeChain(scopeChain);
+    rv = exec.CompileAndExec(options, utf16script);
+    if (NS_FAILED(rv)) {
+      return false;
+    }
+    rv = exec.ExtractReturnValue(&rval);
+  }
+
+  if (!JS_WrapValue(cx, &rval)) {
+    return false;
+  }
 
   return NS_SUCCEEDED(rv) &&
          (!result || JSValToNPVariant(npp, cx, rval, result));
