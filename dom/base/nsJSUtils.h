@@ -64,6 +64,90 @@ public:
                                   const nsAString& aBody,
                                   JSObject** aFunctionObject);
 
+
+  // ExecutionContext is used to switch compartment.
+  class MOZ_STACK_CLASS ExecutionContext {
+    JSContext* mCx;
+
+    // Compartment in which we should switch to for the execution of the script.
+    JSAutoCompartment mCompartment;
+
+    // Set to a valid handle if a return value is expected.
+    JS::Rooted<JS::Value> mRetValue;
+
+    // Scope chain in which the execution takes place.
+    JS::AutoObjectVector mScopeChain;
+
+    // returned value forwarded when we have to interupt the execution eagerly
+    // with mSkip.
+    nsresult mRv;
+
+    // Used to skip upcoming phases in case of a failure.  In such case the
+    // result is carried by mRv.
+    bool mSkip;
+
+    // Should we set the return value.
+    bool mHasReturnValue;
+
+    // Should the result be serialized before being returned.
+    bool mCoerceToString;
+
+#ifdef DEBUG
+    bool mExpectScopeChain;
+#endif
+
+   public:
+
+    // Enter compartment in which the code would be executed.  The JSContext
+    // must come from an AutoJSAPI that has had TakeOwnershipOfErrorReporting()
+    // called on it.
+    ExecutionContext(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
+
+    ExecutionContext(const ExecutionContext&) = delete;
+    ExecutionContext(ExecutionContext&&) = delete;
+
+    // If a returned value is expected, then the |aCompileOption.noScriptRval|
+    // option should be set to false. The returned value would be wrapped in the
+    // |aCx| compartment when |exitCompartment| is called.
+    ExecutionContext& SetReturnValue(JS::CompileOptions& aCompileOptions) {
+      mHasReturnValue = !aCompileOptions.noScriptRval;
+      MOZ_ASSERT(mRetValue.isUndefined());
+      return *this;
+    }
+
+    // The returned value would be converted to a string if the
+    // |aCoerceToString| is flag set.
+    ExecutionContext& SetCoerceToString(bool aCoerceToString) {
+      MOZ_ASSERT_IF(aCoerceToString, mHasReturnValue);
+      mCoerceToString = aCoerceToString;
+      return *this;
+    }
+
+    // Set the scope chain in which the execution of the code would be in.
+    void SetScopeChain(const JS::AutoObjectVector& aScopeChain);
+
+    // Copy the returned value in the mutable handle argument, in case of a
+    // evaluation failure either during the execution or the conversion of the
+    // result to a string, the nsresult would be set to the corresponding result
+    // code.
+    MOZ_MUST_USE nsresult
+    ExtractReturnValue(JS::MutableHandle<JS::Value> aRetValue);
+
+    // After getting a notification that an off-thread compilation terminated,
+    // this function will synchronize the result by moving it to the main thread
+    // before starting the execution of the script.
+    MOZ_MUST_USE nsresult SyncAndExec(void **aOffThreadToken,
+                                      JS::MutableHandle<JSScript*> aScript);
+
+    // Compile a script contained in a SourceBuffer, and execute it.
+    MOZ_MUST_USE nsresult CompileAndExec(JS::CompileOptions& aCompileOptions,
+                                         JS::SourceBufferHolder& aSrcBuf);
+
+    // Compile a script contained in a string, and execute it.
+    MOZ_MUST_USE nsresult CompileAndExec(JS::CompileOptions& aCompileOptions,
+                                         const nsAString& aScript);
+  };
+
   struct MOZ_STACK_CLASS EvaluateOptions {
     bool coerceToString;
     JS::AutoObjectVector scopeChain;
