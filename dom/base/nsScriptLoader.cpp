@@ -2297,15 +2297,14 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
             nsresult evalRv = NS_OK;
             {
               nsJSUtils::ExecutionContext exec(aes.cx(), global);
-              rv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
               if (!aRequest->mCacheInfo) {
                 evalRv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
               } else {
                 MOZ_ASSERT(aRequest->mBytecodeOffset ==
                            aRequest->mScriptBytecode.length());
-                evalRv = SyncEncodeAndExec(&aRequest->mOffThreadToken,
-                                           aRequest->mScriptBytecode,
-                                           &script);
+                evalRv = exec.SyncEncodeAndExec(&aRequest->mOffThreadToken,
+                                                aRequest->mScriptBytecode,
+                                                &script);
               }
             }
 
