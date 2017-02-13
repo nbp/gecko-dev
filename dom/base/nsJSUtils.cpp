@@ -268,7 +268,7 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
     return mRv;
   }
 
-  if (!JS_ExecuteScript(mCx, scopeChain, script)) {
+  if (!JS_ExecuteScript(mCx, mScopeChain, script)) {
     mSkip = true;
     mRv = EvaluationExceptionToNSResult(mCx);
     return mRv;
