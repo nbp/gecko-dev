@@ -1729,6 +1729,8 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
   request->mIsInline = true;
   request->mURI = mDocument->GetDocumentURI();
   request->mLineNo = aElement->GetScriptLineNumber();
+  request->mProgress = nsScriptLoadRequest::Progress::Loading_Source;
+  request->mDataType = nsScriptLoadRequest::DataType::Source;
 
   if (request->IsModuleRequest()) {
     nsModuleLoadRequest* modReq = request->AsModuleRequest();
@@ -2198,6 +2200,8 @@ nsScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
 nsresult
 nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
 {
+  MOZ_ASSERT(aRequest->IsReadyToRun());
+
   // We need a document to evaluate scripts.
   if (!mDocument) {
     return NS_ERROR_FAILURE;
@@ -2284,7 +2288,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
           rv = exec.DecodeAndExec(options, aRequest->mScriptBytecode,
                                   aRequest->mBytecodeOffset);
         } else {
-          MOZ_ASSERT(aRequest->IsSource() /* TODO: remove --> */ || aRequest->IsUnknownDataType());
+          MOZ_ASSERT(aRequest->IsSource());
           if (aRequest->mOffThreadToken) {
             // Off-main-thread parsing.
             LOG(("ScriptLoadRequest (%p): Sync (off-thread parsing) and Execute",
