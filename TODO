@@ -2,3 +2,5 @@ Bug 900784:
  - Add a preference to enable/disable the bytecode cache.
  - Add telemetry probes to measure the failure cases. (number of restarts)
  - Add test cases, including testing RestartLoad.
+ - Hook the saving of bytecode to be executed after the load-end event:
+     http://logs.glob.uno/?c=mozilla%23jsapi&s=2+Feb+2017&e=3+Feb+2017
