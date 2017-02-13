@@ -299,7 +299,7 @@ nsJSUtils::ExecutionContext::SyncEncodeAndExec(void **aOffThreadToken,
     return mRv;
   }
 
-  if (!JS_ExecuteScript(mCx, scopeChain, aScript)) {
+  if (!JS_ExecuteScript(mCx, mScopeChain, aScript)) {
     mSkip = true;
     mRv = EvaluationExceptionToNSResult(mCx);
     return mRv;
