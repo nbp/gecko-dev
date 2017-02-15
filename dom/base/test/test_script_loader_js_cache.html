@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<!-- https://bugzilla.mozilla.org/show_bug.cgi?id=900784 -->
+<!-- The JS bytecode cache is not supposed to be observable. To make it
+     observable, the nsScriptLoader is intrumented to trigger events on the
+     script tag which carry a number which correspond to the data-type being
+     loaded.
+-->
+<head>
+  <meta charset="utf-8">
+  <title>Test for saving and loading bytecode in/from the necko cache</title>
+  <script src="/resources/testharness.js"></script>
+  <script src="/resources/testharnessreport.js"></script>
+  <script type="application/javascript">
+    function flushNeckoCache() {
+      return new Promise (resolve => {
+        // We need to do a GC pass to ensure the cache entry has been freed.
+        SpecialPowers.gc();
+        SpecialPowers.Services.cache2.QueryInterface(Ci.nsICacheTesting).flush(() => {
+          // reload the iframe to check that we are loading from the bytecode cache
+          resolve();
+        });
+      });
+    };
+
+    async function WaitForScriptTagEvent(url) {
+      var iframe = document.getElementById("iframe");
+      iframe.src = url;
+      await new Promise((resolve, reject) => {
+        iframe.addEventListener("load", () => resolve(), { once: true });
+      })
+
+      return iframe.contentWindow.statePromise;
+    }
+
+    promise_test(async function() {
+      // Setting dom.expose_test_interfaces pref causes the
+      // nsScriptLoadRequest to fire event on script tags, with information
+      // about its internal state. The payload code is configured to monitor
+      // these states and resolve a promise with the path taken by the
+      // script loader.
+      //
+      // Setting dom.script_loader.force_bytecode_cache causes the
+      // nsScriptLoadRequest to force all the conditions necessary to make a
+      // script be saved as bytecode in the alternate data storage provided
+      // by the channel (necko cache).
+      await SpecialPowers.pushPrefEnv({set: [
+        ['dom.expose_test_interfaces', true],
+        ['dom.script_loader.force_bytecode_cache', true]
+      ]});
+
+      // Load the test page, and verify that the code path taken by the
+      // nsScriptLoadRequest corresponds to the code path which is loading a
+      // source and saving it as bytecode.
+      var stateMachineResult = await WaitForScriptTagEvent("file_js_cache.html");
+      assert_equals(stateMachineResult, "bytecode_saved",
+                    "ScriptLoadRequest status after the first visit");
+
+      // When the bytecode is saved, we have to flush the cache, to make it
+      // readable again.
+      await flushNeckoCache();
+
+      // Reload the same test page, and verify that the code path taken by
+      // the nsScriptLoadRequest corresponds to the code path which is
+      // loading bytecode and executing it.
+      var stateMachineResult = await WaitForScriptTagEvent("file_js_cache.html");
+      assert_equals(stateMachineResult, "bytecode_exec",
+                    "ScriptLoadRequest status after the second visit");
+
+    }, "Check that we hit the JS bytecode cache");
+  </script>
+</head>
+<body>
+  <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=900784">Mozilla Bug 900784</a>
+  <iframe id="iframe" src=""></div>
+</body>
+</html>

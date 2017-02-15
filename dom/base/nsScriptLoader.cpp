@@ -56,6 +56,7 @@
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/ConsoleReportCollector.h"
 
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Unused.h"
 #include "nsIScriptError.h"
@@ -87,6 +88,52 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                             nsScriptLoadRequestList& aField,
                             const char* aName,
                             uint32_t aFlags = 0);
+
+// This macro is used to wrap a tracing mechanism which is scheduling events
+// which are then used by the JavaScript code of test cases to track the code
+// path to verify the optimizations are working as expected.
+#define TRACE_FOR_TEST(elem, str)                               \
+  do {                                                          \
+    nsresult rv = NS_OK;                                        \
+    rv = TestingDispatchEvent(elem, NS_LITERAL_STRING(str));    \
+    NS_ENSURE_SUCCESS(rv, rv);                                  \
+  } while(0)
+#define TRACE_FOR_TEST_BOOL(elem, str)                          \
+  do {                                                          \
+    nsresult rv = NS_OK;                                        \
+    rv = TestingDispatchEvent(elem, NS_LITERAL_STRING(str));    \
+    NS_ENSURE_SUCCESS(rv, false);                               \
+  } while(0)
+#define TRACE_FOR_TEST_NONE(elem, str)                          \
+  do {                                                          \
+    TestingDispatchEvent(elem, NS_LITERAL_STRING(str));         \
+  } while(0)
+
+static nsresult
+TestingDispatchEvent(nsIScriptElement* aScriptElement,
+                     const nsAString& aEventType)
+{
+  static bool sExposeTestInterfaceEnabled = false;
+  static bool sExposeTestInterfacePrefCached = false;
+  if (!sExposeTestInterfacePrefCached) {
+    sExposeTestInterfacePrefCached = true;
+    Preferences::AddBoolVarCache(&sExposeTestInterfaceEnabled,
+                                 "dom.expose_test_interfaces",
+                                 false);
+  }
+  if (!sExposeTestInterfaceEnabled) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsINode> target(do_QueryInterface(aScriptElement));
+  if (!target) {
+    return NS_OK;
+  }
+
+  RefPtr<AsyncEventDispatcher> dispatcher =
+    new LoadBlockingAsyncEventDispatcher(target, aEventType, true, false);
+  return dispatcher->PostDOMEvent();
+}
 
 //////////////////////////////////////////////////////////////
 // nsScriptLoadRequest
@@ -1731,6 +1778,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
   request->mLineNo = aElement->GetScriptLineNumber();
   request->mProgress = nsScriptLoadRequest::Progress::Loading_Source;
   request->mDataType = nsScriptLoadRequest::DataType::Source;
+  TRACE_FOR_TEST_BOOL(request->mElement, "scriptloader_load_source");
 
   if (request->IsModuleRequest()) {
     nsModuleLoadRequest* modReq = request->AsModuleRequest();
@@ -2194,6 +2242,22 @@ nsScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
     aOptions->setElement(&elementVal.toObject());
   }
 
+  // When testing, we want to enforce uses of the bytecode cache.
+  static bool sForceBytecodeCacheEnabled = false;
+  static bool sForceBytecodeCachePrefCached = false;
+  if (!sForceBytecodeCachePrefCached) {
+    sForceBytecodeCachePrefCached = true;
+    Preferences::AddBoolVarCache(&sForceBytecodeCacheEnabled,
+                                 "dom.script_loader.force_bytecode_cache",
+                                 false);
+  }
+  // The bytecode cache is only triggered if a script is large enough to be
+  // parsed out of the main thread.  Thus, for testing purposes, we force
+  // parsing any script out of the main thread.
+  if (sForceBytecodeCacheEnabled) {
+    aOptions->forceAsync = true;
+  }
+
   return NS_OK;
 }
 
@@ -2283,6 +2347,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
 
       if (NS_SUCCEEDED(rv)) {
         if (aRequest->IsBytecode()) {
+          TRACE_FOR_TEST(aRequest->mElement, "scriptloader_execute");
           LOG(("ScriptLoadRequest (%p): Decode Bytecode and Execute", aRequest));
           nsJSUtils::ExecutionContext exec(aes.cx(), global);
           rv = exec.DecodeAndExec(options, aRequest->mScriptBytecode,
@@ -2298,8 +2363,10 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
             {
               nsJSUtils::ExecutionContext exec(aes.cx(), global);
               if (!aRequest->mCacheInfo) {
+                TRACE_FOR_TEST(aRequest->mElement, "scriptloader_execute");
                 evalRv = exec.SyncAndExec(&aRequest->mOffThreadToken, &script);
               } else {
+                TRACE_FOR_TEST(aRequest->mElement, "scriptloader_encode_and_execute");
                 MOZ_ASSERT(aRequest->mBytecodeOffset ==
                            aRequest->mScriptBytecode.length());
                 evalRv = exec.SyncEncodeAndExec(&aRequest->mOffThreadToken,
@@ -2311,6 +2378,9 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
             // Save the bytecode.
             // TODO: Move that to a dedicated function, and to another thread.
             do {
+              auto bytecodeFailed = mozilla::MakeScopeExit([&]() {
+                TRACE_FOR_TEST_NONE(aRequest->mElement, "scriptloader_bytecode_failed");
+              });
               if (NS_FAILED(evalRv)) {
                 break;
               }
@@ -2356,6 +2426,12 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
               rv = output->Close();
               LOG(("ScriptLoadRequest (%p): Closing (rv = %X)",
                    aRequest, rv));
+              if (NS_FAILED(rv)) {
+                rv = evalRv;
+                break;
+              }
+              bytecodeFailed.release();
+              TRACE_FOR_TEST(aRequest->mElement, "scriptloader_bytecode_saved");
               rv = evalRv;
             } while (false);
 
@@ -3066,8 +3142,7 @@ nsScriptLoadHandler::nsScriptLoadHandler(nsScriptLoader *aScriptLoader,
     mDecoder()
 {
   MOZ_ASSERT(mRequest->IsUnknownDataType());
-  if (mRequest->IsLoadingSource())
-    mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
+  MOZ_ASSERT(mRequest->IsLoading());
 }
 
 nsScriptLoadHandler::~nsScriptLoadHandler()
@@ -3293,7 +3368,13 @@ nsresult
 nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
 {
   MOZ_ASSERT(mRequest->IsUnknownDataType());
-  MOZ_ASSERT(mRequest->mProgress == nsScriptLoadRequest::Progress::Loading);
+  MOZ_ASSERT(mRequest->IsLoading());
+  if (mRequest->IsLoadingSource()) {
+    mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
+    TRACE_FOR_TEST(mRequest->mElement, "scriptloader_load_source");
+    return NS_OK;
+  }
+
   nsCOMPtr<nsIRequest> req;
   nsresult rv = aLoader->GetRequest(getter_AddRefs(req));
   NS_ASSERTION(req, "StreamLoader's request went away prematurely");
@@ -3305,11 +3386,14 @@ nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
     cic->GetAlternativeDataType(altDataType);
     if (altDataType.EqualsLiteral("javascript/moz-bytecode")) {
       mRequest->mDataType = nsScriptLoadRequest::DataType::Bytecode;
+      TRACE_FOR_TEST(mRequest->mElement, "scriptloader_load_bytecode");
     } else {
       mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
+      TRACE_FOR_TEST(mRequest->mElement, "scriptloader_load_source");
     }
   } else {
     mRequest->mDataType = nsScriptLoadRequest::DataType::Source;
+    TRACE_FOR_TEST(mRequest->mElement, "scriptloader_load_source");
   }
   MOZ_ASSERT(!mRequest->IsUnknownDataType());
   MOZ_ASSERT(mRequest->IsLoading());
