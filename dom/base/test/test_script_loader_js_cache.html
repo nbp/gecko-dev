@@ -24,8 +24,10 @@
     };
 
     async function WaitForScriptTagEvent(url) {
-      var iframe = document.getElementById("iframe");
+      var iframe = document.createElement("iframe");
+      document.body.appendChild(iframe);
       var iwin = iframe.contentWindow;
+      iwin.foo = 5;
       function log_event(evt) {
         dump("\n============================================================================\n" + evt.target + " - " + evt.type + "\n");
         if (iwin.log_script_event) {
@@ -44,7 +46,8 @@
       iwin.addEventListener("scriptloader_fallback", log_event);
       iwin.addEventListener("load", log_event);
       iwin.eventHistory = [];
-        dump("2222\n");
+      dump("2222\n");
+      Math.sin(42);
       iframe.src = url;
 
       await new Promise((resolve, reject) => {
@@ -93,6 +96,5 @@
 </head>
 <body>
   <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=900784">Mozilla Bug 900784</a>
-  <iframe id="iframe" src=""></div>
 </body>
 </html>
