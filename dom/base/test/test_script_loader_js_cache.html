@@ -25,12 +25,33 @@
 
     async function WaitForScriptTagEvent(url) {
       var iframe = document.getElementById("iframe");
+      var iwin = iframe.contentWindow;
+      function log_event(evt) {
+        dump("\n============================================================================\n" + evt.target + " - " + evt.type + "\n");
+        if (iwin.log_script_event) {
+          iwin.log_script_event(evt);
+        } else {
+          iwin.eventHistory.push(evt);
+        }
+      }
+        dump("1111\n");
+      iwin.addEventListener("scriptloader_load_source", log_event);
+      iwin.addEventListener("scriptloader_load_bytecode", log_event);
+      iwin.addEventListener("scriptloader_generate_bytecode", log_event);
+      iwin.addEventListener("scriptloader_execute", log_event);
+      iwin.addEventListener("scriptloader_bytecode_saved", log_event);
+      iwin.addEventListener("scriptloader_bytecode_failed", log_event);
+      iwin.addEventListener("scriptloader_fallback", log_event);
+      iwin.addEventListener("load", log_event);
+      iwin.eventHistory = [];
+        dump("2222\n");
       iframe.src = url;
+
       await new Promise((resolve, reject) => {
         iframe.addEventListener("load", () => resolve(), { once: true });
       })
 
-      return iframe.contentWindow.statePromise;
+      return iwin.statePromise;
     }
 
     promise_test(async function() {
