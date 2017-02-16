@@ -27,7 +27,10 @@ var stateMachine = {
   }
 };
 
-function log_event(evt) {
+var log_script_event = function(evt) {
+  if (!evt.target || evt.target.id != "watchme")
+    return;
+
   // Suppose that there is only one script tag.
   stateHistory.push(evt.type)
   if (typeof stateMachine == "object")
@@ -36,20 +39,24 @@ function log_event(evt) {
     // We arrived to a final state, report the name of it.
     stateMachineResolve(stateMachine);
   } else if (stateMachine === undefined) {
-    // We followed an unknwon transition, report the full history.
-    setTimeout(() => stateMachineReject(stateHistory), 500);
+    // We followed an unknwon transition, report the known history.
+    stateMachineReject(stateHistory);
   }
 }
 
-function register_promise(resolve, reject) {
-  statePromise.then(resolve, reject);
-}
+/*
+var l = document.body;
+l.addEventListener("scriptloader_load_source", log_event);
+l.addEventListener("scriptloader_load_bytecode", log_event);
+l.addEventListener("scriptloader_generate_bytecode", log_event);
+l.addEventListener("scriptloader_execute", log_event);
+l.addEventListener("scriptloader_bytecode_saved", log_event);
+l.addEventListener("scriptloader_bytecode_failed", log_event);
+l.addEventListener("scriptloader_fallback", log_event);
+*/
 
-var s = document.getElementById("watchme");
-s.addEventListener("scriptloader_load_source", log_event);
-s.addEventListener("scriptloader_load_bytecode", log_event);
-s.addEventListener("scriptloader_generate_bytecode", log_event);
-s.addEventListener("scriptloader_execute", log_event);
-s.addEventListener("scriptloader_bytecode_saved", log_event);
-s.addEventListener("scriptloader_bytecode_failed", log_event);
-s.addEventListener("scriptloader_fallback", log_event);
+var history = this.eventHistory || [];
+for (var evt in history) {
+  log_script_event(evt);
+}
+this.eventHistory = [];

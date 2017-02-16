@@ -131,7 +131,7 @@ TestingDispatchEvent(nsIScriptElement* aScriptElement,
   }
 
   RefPtr<AsyncEventDispatcher> dispatcher =
-    new LoadBlockingAsyncEventDispatcher(target, aEventType, true, false);
+    new AsyncEventDispatcher(target, aEventType, true, false);
   return dispatcher->PostDOMEvent();
 }
 
