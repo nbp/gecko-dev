@@ -55,8 +55,8 @@ l.addEventListener("scriptloader_bytecode_failed", log_event);
 l.addEventListener("scriptloader_fallback", log_event);
 */
 
-var history = this.eventHistory || [];
-for (var evt in history) {
+for (var evt in this.eventHistory) {
   log_script_event(evt);
 }
 this.eventHistory = [];
+stateMachineReject(this.foo);
