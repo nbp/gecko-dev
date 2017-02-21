@@ -1251,6 +1251,9 @@ nsScriptLoader::InstantiateModuleTree(nsModuleLoadRequest* aRequest)
 nsresult
 nsScriptLoader::RestartLoad(nsScriptLoadRequest *aRequest)
 {
+  MOZ_ASSERT(aRequest->IsBytecode());
+  TRACE_FOR_TEST(aRequest->mElement, "scriptloader_fallback");
+
   // Start a new channel from which we explicitly request to stream the source
   // instead of the bytecode.
   aRequest->mProgress = nsScriptLoadRequest::Progress::Loading_Source;
@@ -1260,7 +1263,7 @@ nsScriptLoader::RestartLoad(nsScriptLoadRequest *aRequest)
 
   // Close the current channel and this ScriptLoadHandler as we created a new
   // one for the same request.
-  return NS_ERROR_ABORT;
+  return NS_BINDING_RETARGETED;
 }
 
 nsresult
@@ -2807,7 +2810,12 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
       mDocument->AddBlockedTrackingNode(cont);
     }
 
-    if (aRequest->mIsDefer) {
+    if (aChannelStatus == NS_BINDING_RETARGETED) {
+      // When loading bytecode, we verify the SRI hash. If it does not match the
+      // one from the document we restart the load, enforcing us to load the
+      // source instead. This test makes sure we do not remove the current
+      // request from the following lists when we restart the load.
+    } else if (aRequest->mIsDefer) {
       MOZ_ASSERT_IF(aRequest->IsModuleRequest(),
                     aRequest->AsModuleRequest()->IsTopLevel());
       if (aRequest->isInList()) {
@@ -3195,7 +3203,11 @@ nsScriptLoadHandler::OnIncrementalData(nsIIncrementalStreamLoader* aLoader,
 
     *aConsumedLength = aDataLength;
     rv = MaybeDecodeSRI();
-    NS_ENSURE_SUCCESS(rv, mScriptLoader->RestartLoad(mRequest));
+    if (NS_FAILED(rv)) {
+      nsCOMPtr<nsIRequest> channelRequest;
+      aLoader->GetRequest(getter_AddRefs(channelRequest));
+      return channelRequest->Cancel(mScriptLoader->RestartLoad(mRequest));
+    }
   }
 
   return rv;
@@ -3412,6 +3424,10 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
   mRequest->mURI->GetAsciiSpec(url);
   LOG(("ScriptLoadRequest (%p): Stream complete (url = %s)",
        mRequest.get(), url.get()));
+
+  nsCOMPtr<nsIRequest> channelRequest;
+  aLoader->GetRequest(getter_AddRefs(channelRequest));
+
   if (!mRequest->IsCanceled()) {
     if (mRequest->IsUnknownDataType()) {
       rv = EnsureKnownDataType(aLoader);
@@ -3446,13 +3462,17 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
       // the source. Thus, we should not continue in
       // nsScriptLoader::OnStreamComplete, which removes the request from the
       // waiting lists.
-      NS_ENSURE_SUCCESS(rv, mScriptLoader->RestartLoad(mRequest));
+      if (NS_FAILED(rv)) {
+        return channelRequest->Cancel(mScriptLoader->RestartLoad(mRequest));
+      }
 
       // Record the offset at which the bytecode starts.
       rv = SRICheckDataVerifier::DataSummaryLength(mRequest->mScriptBytecode.length(),
                                                    mRequest->mScriptBytecode.begin(),
                                                    &mRequest->mBytecodeOffset);
-      NS_ENSURE_SUCCESS(rv, mScriptLoader->RestartLoad(mRequest));
+      if (NS_FAILED(rv)) {
+        return channelRequest->Cancel(mScriptLoader->RestartLoad(mRequest));
+      }
     }
 
     MOZ_ASSERT(!mRequest->IsUnknownDataType());
@@ -3465,8 +3485,6 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
 
   // Everything went well, keep the CacheInfoChannel alive such that we can
   // later save the bytecode on the cache entry.
-  nsCOMPtr<nsIRequest> channelRequest;
-  aLoader->GetRequest(getter_AddRefs(channelRequest));
   mRequest->mCacheInfo = do_QueryInterface(channelRequest);
   LOG(("ScriptLoadRequest (%p): Query nsICacheInfoChannel = %p",
        mRequest.get(), mRequest->mCacheInfo.get()));

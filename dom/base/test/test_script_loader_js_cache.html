@@ -12,49 +12,93 @@
   <script src="/resources/testharness.js"></script>
   <script src="/resources/testharnessreport.js"></script>
   <script type="application/javascript">
+    // This is the state machine of the trace events produced by the
+    // nsScriptLoader. This state machine is used to give a name to each
+    // code path, such that we can assert each code path with a single word.
+    var scriptLoaderStateMachine = {
+      "scriptloader_load_source": {
+        "scriptloader_encode_and_execute": {
+          "scriptloader_bytecode_saved": "bytecode_saved",
+          "scriptloader_bytecode_failed": "bytecode_failed"
+        },
+        "scriptloader_execute": "source_exec"
+      },
+      "scriptloader_load_bytecode": {
+        "scriptloader_fallback": {
+          // Replicate the top-level state machine without
+          // "scriptloader_load_bytecode" transition.
+          "scriptloader_load_source": {
+            "scriptloader_encode_and_execute": {
+              "scriptloader_bytecode_saved": "fallback_bytecode_saved",
+              "scriptloader_bytecode_failed": "fallback_bytecode_failed"
+            },
+            "scriptloader_execute": "fallback_source_exec"
+          }
+        },
+        "scriptloader_execute": "bytecode_exec"
+      }
+    };
+
     function flushNeckoCache() {
       return new Promise (resolve => {
         // We need to do a GC pass to ensure the cache entry has been freed.
         SpecialPowers.gc();
-        SpecialPowers.Services.cache2.QueryInterface(Ci.nsICacheTesting).flush(() => {
-          // reload the iframe to check that we are loading from the bytecode cache
-          resolve();
-        });
+        var nsICacheTesting = SpecialPowers.Ci.nsICacheTesting;
+        var cacheTesting = SpecialPowers.Services.cache2;
+        cacheTesting = cacheTesting.QueryInterface(nsICacheTesting);
+        cacheTesting.flush(() => { resolve(); });
       });
     };
 
     async function WaitForScriptTagEvent(url) {
       var iframe = document.createElement("iframe");
       document.body.appendChild(iframe);
-      var iwin = iframe.contentWindow;
-      iwin.foo = 5;
+
+      var stateMachine = scriptLoaderStateMachine;
+      var stateHistory = [];
+      var stateMachineResolve, stateMachineReject;
+      var statePromise = new Promise((resolve, reject) => {
+        stateMachineResolve = resolve;
+        stateMachineReject = reject;
+      });
+
+      // Walk the script loader state machine with the emitted events.
       function log_event(evt) {
-        dump("\n============================================================================\n" + evt.target + " - " + evt.type + "\n");
-        if (iwin.log_script_event) {
-          iwin.log_script_event(evt);
-        } else {
-          iwin.eventHistory.push(evt);
+        // If we have multiple script tags in the loaded source, make sure
+        // we only watch a single one.
+        if (evt.target.id != "watchme")
+          return;
+
+        // Suppose that there is only one script tag.
+        dump("## ScriptLoader event: " + evt.type + "\n");
+        stateHistory.push(evt.type)
+        if (typeof stateMachine == "object")
+          stateMachine = stateMachine[evt.type];
+        if (typeof stateMachine == "string") {
+          // We arrived to a final state, report the name of it.
+          // dump("\n\n=======\nresolve with " + stateMachine + "\n");
+          stateMachineResolve(stateMachine);
+        } else if (stateMachine === undefined) {
+          // We followed an unknwon transition, report the known history.
+          stateMachineReject(stateHistory);
         }
       }
-        dump("1111\n");
+
+      var iwin = iframe.contentWindow;
       iwin.addEventListener("scriptloader_load_source", log_event);
       iwin.addEventListener("scriptloader_load_bytecode", log_event);
       iwin.addEventListener("scriptloader_generate_bytecode", log_event);
       iwin.addEventListener("scriptloader_execute", log_event);
+      iwin.addEventListener("scriptloader_encode_and_execute", log_event);
       iwin.addEventListener("scriptloader_bytecode_saved", log_event);
       iwin.addEventListener("scriptloader_bytecode_failed", log_event);
       iwin.addEventListener("scriptloader_fallback", log_event);
-      iwin.addEventListener("load", log_event);
-      iwin.eventHistory = [];
-      dump("2222\n");
-      Math.sin(42);
       iframe.src = url;
 
-      await new Promise((resolve, reject) => {
-        iframe.addEventListener("load", () => resolve(), { once: true });
-      })
-
-      return iwin.statePromise;
+      statePromise.then(() => {
+        document.body.removeChild(iframe);
+      });
+      return statePromise;
     }
 
     promise_test(async function() {
@@ -76,22 +120,47 @@
       // Load the test page, and verify that the code path taken by the
       // nsScriptLoadRequest corresponds to the code path which is loading a
       // source and saving it as bytecode.
-      var stateMachineResult = await WaitForScriptTagEvent("file_js_cache.html");
-      assert_equals(stateMachineResult, "bytecode_saved",
-                    "ScriptLoadRequest status after the first visit");
+      var stateMachineResult = WaitForScriptTagEvent("file_js_cache.html");
+      assert_equals(await stateMachineResult, "bytecode_saved",
+                    "[1] ScriptLoadRequest status after the first visit");
 
-      // When the bytecode is saved, we have to flush the cache, to make it
-      // readable again.
+      // When the bytecode is saved, we have to flush the cache to read it.
       await flushNeckoCache();
 
       // Reload the same test page, and verify that the code path taken by
       // the nsScriptLoadRequest corresponds to the code path which is
       // loading bytecode and executing it.
-      var stateMachineResult = await WaitForScriptTagEvent("file_js_cache.html");
-      assert_equals(stateMachineResult, "bytecode_exec",
-                    "ScriptLoadRequest status after the second visit");
+      stateMachineResult = WaitForScriptTagEvent("file_js_cache.html");
+      assert_equals(await stateMachineResult, "bytecode_exec",
+                    "[2] ScriptLoadRequest status after the second visit");
 
-    }, "Check that we hit the JS bytecode cache");
+      // Loading another page which loads the same script with an SRI, while
+      // the cached bytecode does not have any. This should fallback to
+      // loading the source before saving the bytecode once more.
+      stateMachineResult = WaitForScriptTagEvent("file_js_cache_with_sri.html");
+      assert_equals(await stateMachineResult, "fallback_bytecode_saved",
+                    "[3] ScriptLoadRequest status after the SRI hash");
+
+      // When the bytecode is saved, we have to flush the cache to read it.
+      await flushNeckoCache();
+
+      // Loading a page, which has the same SRI should verify the SRI and
+      // continue by executing the bytecode.
+      var stateMachineResult1 = WaitForScriptTagEvent("file_js_cache_with_sri.html");
+
+      // Loading a page which does not have a SRI while we have one in the
+      // cache should not change anything. We should also be able to load
+      // the cache simultanesouly.
+      var stateMachineResult2 = WaitForScriptTagEvent("file_js_cache.html");
+
+      assert_equals(await stateMachineResult1, "bytecode_exec",
+                    "[4] ScriptLoadRequest status after same SRI hash");
+      assert_equals(await stateMachineResult2, "bytecode_exec",
+                    "[5] ScriptLoadRequest status after visit with no SRI");
+
+    }, "Check the JS bytecode cache");
+
+    done();
   </script>
 </head>
 <body>
