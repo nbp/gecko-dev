@@ -262,9 +262,8 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
   JS::Rooted<JSScript*> script(mCx);
   JS::TranscodeResult tr = JS::DecodeScript(mCx, aBytecodeBuf, &script, aBytecodeIndex);
   if (tr != JS::TranscodeResult_Ok) {
-    // TODO: Handle logical failures in case where the version check is failing.
     mSkip = true;
-    mRv = EvaluationExceptionToNSResult(mCx);
+    mRv = NS_ERROR_DOM_JS_DECODING_ERROR;
     return mRv;
   }
 
