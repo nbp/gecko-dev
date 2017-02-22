@@ -1352,14 +1352,23 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
   NS_ENSURE_SUCCESS(rv, rv);
 
   aRequest->mCacheInfo = nullptr;
+  nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
   LOG(("ScriptLoadRequest (%p): mProgress = %x", aRequest, aRequest->mProgress));
-  if (!aRequest->IsLoadingSource()) {
-    // Inform the HTTP cache that we prefer to have information coming from the
-    // bytecode cache instead of the sources, if such entry is already registered.
-    nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-    if (cic) {
+  if (cic) {
+    if (!aRequest->IsLoadingSource()) {
+      // Inform the HTTP cache that we prefer to have information coming from the
+      // bytecode cache instead of the sources, if such entry is already registered.
       LOG(("ScriptLoadRequest (%p): Maybe request bytecode", aRequest));
       cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
+    } else {
+      // If we are explicitly loading from the sources, such as after a
+      // restarted request, we might still want to save the bytecode after.
+      //
+      // The following tell the cache to look for an alternative data type which
+      // does not exists, such that we can later save the bytecode with a
+      // different alternative data type.
+      LOG(("ScriptLoadRequest (%p): Request saving bytecode later", aRequest));
+      cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/null"));
     }
   }
 
