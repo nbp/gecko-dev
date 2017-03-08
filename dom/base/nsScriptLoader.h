@@ -100,7 +100,7 @@ public:
   }
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(nsScriptLoadRequest)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsScriptLoadRequest)
 
   bool IsModuleRequest() const
   {
@@ -208,6 +208,10 @@ public:
   bool mIsTracking;       // True if the script comes from a source on our tracking protection list.
   void* mOffThreadToken;  // Off-thread parsing token.
   nsString mSourceMapURL; // Holds source map url for loaded scripts
+
+  // Holds the top-level JSScript that corresponds to the current source, once
+  // it is parsed, and planned to be saved in the bytecode cache.
+  JS::Heap<JSScript*> mScript;
 
   // Holds script text for non-inline scripts. Don't use nsString so we can give
   // ownership to jsapi.
@@ -531,6 +535,13 @@ public:
     return mDocument->GetDocGroup();
   }
 
+  /**
+   * Register the fact that we saw the load event, and that we need to save the
+   * bytecode at the next loop cycle unless new scripts are waiting in the
+   * pipeline.
+   */
+  void LoadEventFired();
+
 private:
   virtual ~nsScriptLoader();
 
@@ -616,6 +627,30 @@ private:
                            nsScriptLoadRequest* aRequest);
   nsresult EvaluateScript(nsScriptLoadRequest* aRequest);
 
+  /**
+   * Queue the current script load request to be saved, when a page
+   * initialization ended. The page initialization end is defined as being the
+   * time when the load event got received, and when no more scripts are waiting
+   * to be executed.
+   */
+  void RegisterForBytecodeEncoding(nsScriptLoadRequest* aRequest);
+
+  /**
+   * Check if all conditions are met, i-e that the onLoad event ended and that
+   * no more script have to be processed.  If all conditions are met, queue an
+   * event to encode all the bytecode and save them on the cache.
+   */
+  void MaybeTriggerBytecodeEncoding();
+
+  /**
+   * Iterate over all script load request and save the bytecode of executed
+   * functions on the cache provided by the channel.
+   */
+  void EncodeBytecode();
+  void EncodeRequestBytecode(JSContext* aCx, nsScriptLoadRequest* aRequest);
+
+  void GiveUpBytecodeEncoding();
+
   already_AddRefed<nsIScriptGlobalObject> GetScriptGlobalObject();
   nsresult FillCompileOptionsForRequest(const mozilla::dom::AutoJSAPI& jsapi,
                                         nsScriptLoadRequest* aRequest,
@@ -670,6 +705,10 @@ private:
   nsScriptLoadRequestList mXSLTRequests;
   RefPtr<nsScriptLoadRequest> mParserBlockingRequest;
 
+  // List of script load request that are holding a buffer which has to be saved
+  // on the cache.
+  nsScriptLoadRequestList mBytecodeEncodingQueue;
+
   // In mRequests, the additional information here is stored by the element.
   struct PreloadInfo {
     RefPtr<nsScriptLoadRequest> mRequest;
@@ -703,6 +742,7 @@ private:
   bool mDeferEnabled;
   bool mDocumentParsingDone;
   bool mBlockingDOMContentLoaded;
+  bool mLoadEventFired;
 
   // Module map
   nsRefPtrHashtable<nsURIHashKey, mozilla::GenericPromise::Private> mFetchingModules;

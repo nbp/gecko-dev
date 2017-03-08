@@ -61,6 +61,7 @@
         stateMachineResolve = resolve;
         stateMachineReject = reject;
       });
+      var ping = 0;
 
       // Walk the script loader state machine with the emitted events.
       function log_event(evt) {
@@ -77,7 +78,11 @@
         if (typeof stateMachine == "string") {
           // We arrived to a final state, report the name of it.
           // dump("\n\n=======\nresolve with " + stateMachine + "\n");
-          stateMachineResolve(stateMachine);
+          var result = stateMachine;
+          if (ping) {
+            result = `${result} & ping(=${ping})`;
+          }
+          stateMachineResolve(result);
         } else if (stateMachine === undefined) {
           // We followed an unknwon transition, report the known history.
           stateMachineReject(stateHistory);
@@ -93,6 +98,10 @@
       iwin.addEventListener("scriptloader_bytecode_saved", log_event);
       iwin.addEventListener("scriptloader_bytecode_failed", log_event);
       iwin.addEventListener("scriptloader_fallback", log_event);
+      iwin.addEventListener("ping", (evt) => {
+        ping += 1;
+        dump(`## Content event: ${evt.type} (=${ping})\n`);
+      });
       iframe.src = url;
 
       statePromise.then(() => {
@@ -159,6 +168,22 @@
                     "[5] ScriptLoadRequest status after visit with no SRI");
 
     }, "Check the JS bytecode cache");
+
+    promise_test(async function() {
+      // (see above)
+      await SpecialPowers.pushPrefEnv({set: [
+        ['dom.expose_test_interfaces', true],
+        ['dom.script_loader.force_bytecode_cache', true]
+      ]});
+
+      // The test page add a new script which generate a "ping" event, which
+      // should be recorded before we after the bytecode in the cache.
+      var stateMachineResult =
+          WaitForScriptTagEvent("file_js_cache_save_after_load.html");
+      assert_equals(await stateMachineResult, "bytecode_saved & ping(=3)",
+                    "Wait on all scripts to be executed");
+
+    }, "Save bytecode after load event");
 
     done();
   </script>
