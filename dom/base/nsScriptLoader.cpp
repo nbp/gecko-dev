@@ -1285,6 +1285,20 @@ nsScriptLoader::RestartLoad(nsScriptLoadRequest *aRequest)
   return NS_BINDING_RETARGETED;
 }
 
+static bool
+IsBytecodeCacheEnabled()
+{
+  static bool sExposeTestInterfaceEnabled = true;
+  static bool sExposeTestInterfacePrefCached = false;
+  if (!sExposeTestInterfacePrefCached) {
+    sExposeTestInterfacePrefCached = true;
+    Preferences::AddBoolVarCache(&sExposeTestInterfaceEnabled,
+                                 "dom.script_loader.bytecode_cache.enabled",
+                                 true);
+  }
+  return sExposeTestInterfaceEnabled;
+}
+
 nsresult
 nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
 {
@@ -1373,7 +1387,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
   aRequest->mCacheInfo = nullptr;
   nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
   LOG(("ScriptLoadRequest (%p): mProgress = %x", aRequest, aRequest->mProgress));
-  if (cic) {
+  if (cic && IsBytecodeCacheEnabled()) {
     if (!aRequest->IsLoadingSource()) {
       // Inform the HTTP cache that we prefer to have information coming from the
       // bytecode cache instead of the sources, if such entry is already registered.
@@ -3656,7 +3670,7 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
 
   // Everything went well, keep the CacheInfoChannel alive such that we can
   // later save the bytecode on the cache entry.
-  if (mRequest->IsSource()) {
+  if (mRequest->IsSource() && IsBytecodeCacheEnabled()) {
     mRequest->mCacheInfo = do_QueryInterface(channelRequest);
   }
   LOG(("ScriptLoadRequest (%p): Query nsICacheInfoChannel = %p",
