@@ -1386,7 +1386,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
 
   aRequest->mCacheInfo = nullptr;
   nsCOMPtr<nsICacheInfoChannel> cic(do_QueryInterface(channel));
-  LOG(("ScriptLoadRequest (%p): mProgress = %x", aRequest, aRequest->mProgress));
+  LOG(("ScriptLoadRequest (%p): mProgress = %x", aRequest, unsigned(aRequest->mProgress)));
   if (cic && IsBytecodeCacheEnabled()) {
     if (!aRequest->IsLoadingSource()) {
       // Inform the HTTP cache that we prefer to have information coming from the
@@ -2430,7 +2430,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
             } else {
               TRACE_FOR_TEST_NONE(aRequest->mElement, "scriptloader_bytecode_failed");
               LOG(("ScriptLoadRequest (%p): Cannot cache anything (rv = %X, script = %p, cacheInfo = %p)",
-                   aRequest, rv, script.get(), aRequest->mCacheInfo.get()));
+                   aRequest, unsigned(rv), script.get(), aRequest->mCacheInfo.get()));
               aRequest->mCacheInfo = nullptr;
             }
 
@@ -2581,21 +2581,21 @@ nsScriptLoader::EncodeRequestBytecode(JSContext* aCx, nsScriptLoadRequest* aRequ
                                                          getter_AddRefs(output));
   if (NS_FAILED(rv)) {
     LOG(("ScriptLoadRequest (%p): Cannot open bytecode cache (rv = %X, output = %p)",
-         aRequest, rv, output.get()));
+         aRequest, unsigned(rv), output.get()));
     return;
   }
   MOZ_ASSERT(output);
   auto closeOutStream = mozilla::MakeScopeExit([&]() {
     nsresult rv = output->Close();
     LOG(("ScriptLoadRequest (%p): Closing (rv = %X)",
-         aRequest, rv));
+         aRequest, unsigned(rv)));
   });
 
   uint32_t n;
   rv = output->Write(reinterpret_cast<char*>(aRequest->mScriptBytecode.begin()),
                      aRequest->mScriptBytecode.length(), &n);
   LOG(("ScriptLoadRequest (%p): Write bytecode cache (rv = %X, length = %u, written = %u)",
-       aRequest, rv, unsigned(aRequest->mScriptBytecode.length()), n));
+       aRequest, unsigned(rv), unsigned(aRequest->mScriptBytecode.length()), n));
   if (NS_FAILED(rv)) {
     return;
   }
