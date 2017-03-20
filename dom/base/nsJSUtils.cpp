@@ -254,11 +254,11 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
                                            mozilla::Vector<uint8_t>& aBytecodeBuf,
                                            size_t aBytecodeIndex)
 {
-  MOZ_ASSERT(!mHasReturnValue);
   if (mSkip) {
     return mRv;
   }
 
+  MOZ_ASSERT(!mWantsReturnValue);
   JS::Rooted<JSScript*> script(mCx);
   JS::TranscodeResult tr = JS::DecodeScript(mCx, aBytecodeBuf, &script, aBytecodeIndex);
   if (tr != JS::TranscodeResult_Ok) {
