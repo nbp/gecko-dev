@@ -281,7 +281,7 @@ nsJSUtils::ExecutionContext::SyncEncodeAndExec(void **aOffThreadToken,
                                                mozilla::Vector<uint8_t>& aBytecodeBuf,
                                                JS::MutableHandle<JSScript*> aScript)
 {
-  MOZ_ASSERT_IF(aOffThreadToken, !mHasReturnValue);
+  MOZ_ASSERT_IF(aOffThreadToken, !mWantsReturnValue);
   aScript.set(JS::FinishOffThreadScript(mCx, *aOffThreadToken));
   *aOffThreadToken = nullptr; // Mark the token as having been finished.
   if (!aScript) {
