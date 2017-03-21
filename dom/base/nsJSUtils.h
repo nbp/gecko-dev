@@ -158,6 +158,11 @@ public:
                                         mozilla::Vector<uint8_t>& aBytecodeBuf,
                                         size_t aBytecodeIndex);
 
+    // After getting a notification that an off-thread decoding terminated,
+    // this function will synchronize the result by moving it to the main thread
+    // before starting the execution of the script.
+    MOZ_MUST_USE nsresult DecodeSyncAndExec(void **aOffThreadToken);
+
     // Similar to SyncAndExec, except that in addition to fecth the source, we
     // register the fact that we plan to encode its bytecode later.
     MOZ_MUST_USE nsresult SyncEncodeAndExec(void **aOffThreadToken,

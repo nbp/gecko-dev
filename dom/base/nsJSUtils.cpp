@@ -277,6 +277,27 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
 }
 
 nsresult
+nsJSUtils::ExecutionContext::DecodeSyncAndExec(void **aOffThreadToken)
+{
+  if (mSkip) {
+    return mRv;
+  }
+
+  MOZ_ASSERT(!mWantsReturnValue);
+  MOZ_ASSERT(!mExpectScopeChain);
+  JS::Rooted<JSScript*> script(mCx);
+  script.set(JS::FinishOffThreadScriptDecoder(mCx, *aOffThreadToken));
+  *aOffThreadToken = nullptr; // Mark the token as having been finished.
+  if (!script || !JS_ExecuteScript(mCx, mScopeChain, script)) {
+    mSkip = true;
+    mRv = EvaluationExceptionToNSResult(mCx);
+    return mRv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
 nsJSUtils::ExecutionContext::SyncEncodeAndExec(void **aOffThreadToken,
                                                mozilla::Vector<uint8_t>& aBytecodeBuf,
                                                JS::MutableHandle<JSScript*> aScript)
