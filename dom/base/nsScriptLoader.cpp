@@ -79,6 +79,11 @@ static LazyLogModule gScriptLoaderLog("ScriptLoader");
 #define LOG_ERROR(args)                                                       \
   MOZ_LOG(gScriptLoaderLog, mozilla::LogLevel::Error, args)
 
+// These are the Alternate Data MIME type used by the nsScriptLoader to
+// register and read bytecode out of the nsCacheInfoChannel.
+static NS_NAMED_LITERAL_CSTRING(
+  kBytecodeMimeType, "javascript/moz-bytecode-" NS_STRINGIFY(MOZ_BUILDID));
+static NS_NAMED_LITERAL_CSTRING(kNullMimeType, "javascript/null");
 
 void
 ImplCycleCollectionUnlink(nsScriptLoadRequestList& aField);
@@ -1392,7 +1397,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
       // Inform the HTTP cache that we prefer to have information coming from the
       // bytecode cache instead of the sources, if such entry is already registered.
       LOG(("ScriptLoadRequest (%p): Maybe request bytecode", aRequest));
-      cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/moz-bytecode"));
+      cic->PreferAlternativeDataType(kBytecodeMimeType);
     } else {
       // If we are explicitly loading from the sources, such as after a
       // restarted request, we might still want to save the bytecode after.
@@ -1401,7 +1406,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest)
       // does not exists, such that we can later save the bytecode with a
       // different alternative data type.
       LOG(("ScriptLoadRequest (%p): Request saving bytecode later", aRequest));
-      cic->PreferAlternativeDataType(NS_LITERAL_CSTRING("javascript/null"));
+      cic->PreferAlternativeDataType(kNullMimeType);
     }
   }
 
@@ -2577,7 +2582,7 @@ nsScriptLoader::EncodeRequestBytecode(JSContext* aCx, nsScriptLoadRequest* aRequ
   // might fail if the stream is already open by another request, in which
   // case, we just ignore the current one.
   nsCOMPtr<nsIOutputStream> output;
-  rv = aRequest->mCacheInfo->OpenAlternativeOutputStream(NS_LITERAL_CSTRING("javascript/moz-bytecode"),
+  rv = aRequest->mCacheInfo->OpenAlternativeOutputStream(kBytecodeMimeType,
                                                          getter_AddRefs(output));
   if (NS_FAILED(rv)) {
     LOG(("ScriptLoadRequest (%p): Cannot open bytecode cache (rv = %X, output = %p)",
@@ -3581,7 +3586,7 @@ nsScriptLoadHandler::EnsureKnownDataType(nsIIncrementalStreamLoader *aLoader)
   if (cic) {
     nsAutoCString altDataType;
     cic->GetAlternativeDataType(altDataType);
-    if (altDataType.EqualsLiteral("javascript/moz-bytecode")) {
+    if (altDataType == kBytecodeMimeType) {
       mRequest->mDataType = nsScriptLoadRequest::DataType::Bytecode;
       TRACE_FOR_TEST(mRequest->mElement, "scriptloader_load_bytecode");
     } else {
