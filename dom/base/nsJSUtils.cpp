@@ -261,6 +261,11 @@ nsJSUtils::ExecutionContext::DecodeAndExec(JS::CompileOptions& aCompileOptions,
   MOZ_ASSERT(!mWantsReturnValue);
   JS::Rooted<JSScript*> script(mCx);
   JS::TranscodeResult tr = JS::DecodeScript(mCx, aBytecodeBuf, &script, aBytecodeIndex);
+  // These errors are external parameters which should be handled before the
+  // decoding phase, and which are the only reasons why you might want to
+  // fallback on decoding failures.
+  MOZ_ASSERT(tr != JS::TranscodeResult_Failure_BadBuildId &&
+             tr != JS::TranscodeResult_Failure_WrongCompileOption);
   if (tr != JS::TranscodeResult_Ok) {
     mSkip = true;
     mRv = NS_ERROR_DOM_JS_DECODING_ERROR;
