@@ -67,6 +67,7 @@
       function log_event(evt) {
         // If we have multiple script tags in the loaded source, make sure
         // we only watch a single one.
+        dump("## ScriptLoader target: " + evt.target + ", id = " + evt.target.id + "\n");
         if (evt.target.id != "watchme")
           return;
 
