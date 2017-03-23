@@ -2972,8 +2972,9 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
   // us save this hash in case we save the bytecode of this script in the cache.
   if (NS_SUCCEEDED(rv) && aRequest->IsSource()) {
     MOZ_ASSERT(aRequest->mScriptBytecode.empty());
-    if (!aRequest->mIntegrity.IsEmpty()) {
-      MOZ_ASSERT(aSRIDataVerifier);
+    // If the integrity metadata does not correspond to a valid hash function,
+    // IsComplete would be false.
+    if (!aRequest->mIntegrity.IsEmpty() && aSRIDataVerifier->IsComplete()) {
       // Encode the SRI computed hash.
       uint32_t len = aSRIDataVerifier->DataSummaryLength();
       if (!aRequest->mScriptBytecode.growBy(len)) {
@@ -2986,7 +2987,6 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
         aRequest->mScriptBytecode.begin());
       MOZ_ASSERT(NS_SUCCEEDED(res));
     } else {
-      MOZ_ASSERT(!aSRIDataVerifier);
       // Encode a dummy SRI hash, in case another request expects one.
       uint32_t len = SRICheckDataVerifier::EmptyDataSummaryLength();
       if (!aRequest->mScriptBytecode.growBy(len)) {
