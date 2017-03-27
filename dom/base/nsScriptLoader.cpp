@@ -3722,17 +3722,23 @@ nsScriptLoadHandler::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     MOZ_ASSERT(!mRequest->IsUnknownDataType());
   }
 
-  // we have to mediate and use mRequest.
-  rv = mScriptLoader->OnStreamComplete(aLoader, mRequest, aStatus, mSRIStatus,
-                                       mSRIDataVerifier);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Everything went well, keep the CacheInfoChannel alive such that we can
   // later save the bytecode on the cache entry.
-  if (mRequest->IsSource() && IsBytecodeCacheEnabled()) {
+  if (NS_SUCCEEDED(rv) && mRequest->IsSource() && IsBytecodeCacheEnabled()) {
     mRequest->mCacheInfo = do_QueryInterface(channelRequest);
   }
   LOG(("ScriptLoadRequest (%p): Query nsICacheInfoChannel = %p",
        mRequest.get(), mRequest->mCacheInfo.get()));
+
+  // we have to mediate and use mRequest.
+  rv = mScriptLoader->OnStreamComplete(aLoader, mRequest, aStatus, mSRIStatus,
+                                       mSRIDataVerifier);
+
+  // In case of failure, clear the mCacheInfoChannel to avoid keeping it alive.
+  if (NS_FAILED(rv)) {
+    mRequest->mCacheInfo = nullptr;
+  }
+
+  NS_ENSURE_SUCCESS(rv, rv);
   return rv;
 }
