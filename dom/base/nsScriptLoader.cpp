@@ -2007,16 +2007,19 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
 
   // Don't off-thread compile inline scripts.
   if (aRequest->mIsInline) {
+    LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): aRequest->mIsInline", aRequest));
     return NS_ERROR_FAILURE;
   }
 
   nsCOMPtr<nsIScriptGlobalObject> globalObject = GetScriptGlobalObject();
   if (!globalObject) {
+    LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): !globalObject", aRequest));
     return NS_ERROR_FAILURE;
   }
 
   AutoJSAPI jsapi;
   if (!jsapi.Init(globalObject)) {
+    LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): !jsapi.Init(globalObject)", aRequest));
     return NS_ERROR_FAILURE;
   }
 
@@ -2026,6 +2029,7 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
 
   nsresult rv = FillCompileOptionsForRequest(jsapi, aRequest, global, &options);
   if (NS_WARN_IF(NS_FAILED(rv))) {
+    LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): FillCompileOptionsForRequest failed", aRequest));
     return rv;
   }
 
@@ -2033,6 +2037,7 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
     ? aRequest->mScriptText.length()
     : aRequest->mScriptBytecode.length();
   if (!JS::CanCompileOffThread(cx, options, len)) {
+    LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): JS::CanCompileOffThread(cx, options, len) failed", aRequest));
     return NS_ERROR_FAILURE;
   }
 
@@ -2054,6 +2059,7 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
                               aRequest->mScriptText.length(),
                               OffThreadScriptLoaderCallback,
                               static_cast<void*>(runnable))) {
+      LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): JS::CompileOffThread failed", aRequest));
       return NS_ERROR_OUT_OF_MEMORY;
     }
   } else {
@@ -2074,6 +2080,7 @@ nsScriptLoader::AttemptAsyncScriptCompile(nsScriptLoadRequest* aRequest)
   aRequest->mProgress = nsScriptLoadRequest::Progress::Compiling;
 
   Unused << runnable.forget();
+  LOG(("nsScriptLoader::AttemptAsyncScriptCompile (%p): return NS_OK", aRequest));
   return NS_OK;
 }
 
@@ -2324,6 +2331,7 @@ nsScriptLoader::FillCompileOptionsForRequest(const AutoJSAPI&jsapi,
   if (sForceBytecodeCacheEnabled) {
     aOptions->forceAsync = true;
   }
+  LOG(("ScriptLoadRequest (%p): Force Async parsing. (%s)", aRequest, (aOptions->forceAsync ? "true" : "false")));
 
   return NS_OK;
 }
@@ -3131,10 +3139,12 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                                      nsresult aStatus)
 {
   if (NS_FAILED(aStatus)) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): NS_FAILED(aStatus)", aRequest));
     return aStatus;
   }
 
   if (aRequest->IsCanceled()) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): aRequest->IsCanceled()", aRequest));
     return NS_BINDING_ABORTED;
   }
   MOZ_ASSERT(aRequest->IsLoading());
@@ -3142,6 +3152,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   // If we don't have a document, then we need to abort further
   // evaluation.
   if (!mDocument) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): !mDocument", aRequest));
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -3153,20 +3164,24 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(req);
   if (httpChannel) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): httpChannel", aRequest));
     bool requestSucceeded;
     rv = httpChannel->GetRequestSucceeded(&requestSucceeded);
     if (NS_SUCCEEDED(rv) && !requestSucceeded) {
+      LOG(("nsScriptLoader::PrepareLoadedRequest (%p): NS_SUCCEEDED(rv) && !requestSucceeded", aRequest));
       return NS_ERROR_NOT_AVAILABLE;
     }
 
     nsAutoCString sourceMapURL;
     rv = httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("X-SourceMap"), sourceMapURL);
     if (NS_SUCCEEDED(rv)) {
+      LOG(("nsScriptLoader::PrepareLoadedRequest (%p): NS_SUCCEEDED(rv)", aRequest));
       aRequest->mHasSourceMapURL = true;
       aRequest->mSourceMapURL = NS_ConvertUTF8toUTF16(sourceMapURL);
     }
 
     if (httpChannel->GetIsTrackingResource()) {
+      LOG(("nsScriptLoader::PrepareLoadedRequest (%p): httpChannel->GetIsTrackingResource()", aRequest));
       aRequest->SetIsTracking();
     }
   }
@@ -3176,6 +3191,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   // separate origin principal, so that it will treat our document's
   // principal as the origin principal
   if (aRequest->mCORSMode == CORS_NONE) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): aRequest->mCORSMode == CORS_NONE", aRequest));
     rv = nsContentUtils::GetSecurityManager()->
       GetChannelResultPrincipal(channel, getter_AddRefs(aRequest->mOriginPrincipal));
     NS_ENSURE_SUCCESS(rv, rv);
@@ -3197,6 +3213,7 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                "aRequest should be pending!");
 
   if (aRequest->IsModuleRequest()) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): aRequest->IsModuleRequest()", aRequest));
     MOZ_ASSERT(aRequest->IsSource());
     nsModuleLoadRequest* request = aRequest->AsModuleRequest();
 
@@ -3224,13 +3241,25 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   // The script is now loaded and ready to run.
   aRequest->SetReady();
 
+  if (aRequest->IsSource()) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): aRequest->IsSource()", aRequest));
+  }
+  if (aRequest == mParserBlockingRequest) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): aRequest == mParserBlockingRequest", aRequest));
+  }
+  if (NumberOfProcessors() > 1) {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): NumberOfProcessors() > 1", aRequest));
+  }
+
   // If this is currently blocking the parser, attempt to compile it off-main-thread.
   if (aRequest->IsSource() && aRequest == mParserBlockingRequest &&
       (NumberOfProcessors() > 1))
   {
+    LOG(("nsScriptLoader::PrepareLoadedRequest (%p): AttemptAsyncScriptCompile", aRequest));
     MOZ_ASSERT(!aRequest->IsModuleRequest());
     nsresult rv = AttemptAsyncScriptCompile(aRequest);
     if (rv == NS_OK) {
+      LOG(("nsScriptLoader::PrepareLoadedRequest (%p): rv == NS_OK", aRequest));
       MOZ_ASSERT(aRequest->mProgress == nsScriptLoadRequest::Progress::Compiling,
                  "Request should be off-thread compiling now.");
       return NS_OK;
@@ -3238,12 +3267,14 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
 
     // If off-thread compile errored, return the error.
     if (rv != NS_ERROR_FAILURE) {
+      LOG(("nsScriptLoader::PrepareLoadedRequest (%p): rv != NS_ERROR_FAILURE", aRequest));
       return rv;
     }
 
     // If off-thread compile was rejected, continue with regular processing.
   }
 
+  LOG(("nsScriptLoader::PrepareLoadedRequest (%p): MaybeMoveToLoadedList(aRequest)", aRequest));
   MaybeMoveToLoadedList(aRequest);
 
   return NS_OK;
