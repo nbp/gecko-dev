@@ -2467,6 +2467,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
             nsJSUtils::ExecutionContext exec(aes.cx(), global);
             nsAutoString inlineData;
             SourceBufferHolder srcBuf = GetScriptSource(aRequest, inlineData);
+            TRACE_FOR_TEST(aRequest->mElement, "scriptloader_execute");
             rv = exec.CompileAndExec(options, srcBuf);
             aRequest->mCacheInfo = nullptr;
           }
