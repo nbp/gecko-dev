@@ -2400,7 +2400,9 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
     }
 
     if (aRequest->IsModuleRequest()) {
-      MOZ_ASSERT(aRequest->IsSource());
+      // When a module is already loaded, it is not feched a second time and the
+      // mDataType of the request might remain set to DataType::Unknown.
+      MOZ_ASSERT(!aRequest->IsBytecode());
       LOG(("ScriptLoadRequest (%p): Evaluate Module", aRequest));
       nsModuleLoadRequest* request = aRequest->AsModuleRequest();
       MOZ_ASSERT(request->mModuleScript);
