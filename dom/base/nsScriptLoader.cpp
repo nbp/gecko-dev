@@ -1297,13 +1297,13 @@ nsScriptLoader::RestartLoad(nsScriptLoadRequest *aRequest)
 static bool
 IsBytecodeCacheEnabled()
 {
-  static bool sExposeTestInterfaceEnabled = true;
+  static bool sExposeTestInterfaceEnabled = false;
   static bool sExposeTestInterfacePrefCached = false;
   if (!sExposeTestInterfacePrefCached) {
     sExposeTestInterfacePrefCached = true;
     Preferences::AddBoolVarCache(&sExposeTestInterfaceEnabled,
                                  "dom.script_loader.bytecode_cache.enabled",
-                                 true);
+                                 false);
   }
   return sExposeTestInterfaceEnabled;
 }

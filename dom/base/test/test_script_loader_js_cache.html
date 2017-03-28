@@ -123,6 +123,7 @@
       // script be saved as bytecode in the alternate data storage provided
       // by the channel (necko cache).
       await SpecialPowers.pushPrefEnv({set: [
+        ['dom.script_loader.bytecode_cache.enabled', true],
         ['dom.expose_test_interfaces', true],
         ['dom.script_loader.force_bytecode_cache', true]
       ]});
@@ -173,6 +174,7 @@
     promise_test(async function() {
       // (see above)
       await SpecialPowers.pushPrefEnv({set: [
+        ['dom.script_loader.bytecode_cache.enabled', true],
         ['dom.expose_test_interfaces', true],
         ['dom.script_loader.force_bytecode_cache', true]
       ]});
