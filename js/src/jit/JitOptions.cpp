@@ -58,7 +58,8 @@ T overrideDefault(const char* param, T dflt) {
   return dflt;
 }
 
-#define SET_DEFAULT(var, dflt) var = overrideDefault("JIT_OPTION_" #var, dflt)
+#define GET_DEFAULT(var, dflt) overrideDefault("JIT_OPTION_" #var, dflt)
+#define SET_DEFAULT(var, dflt) var = GET_DEFAULT(var, dflt)
 DefaultJitOptions::DefaultJitOptions() {
   // Whether to perform expensive graph-consistency DEBUG-only assertions.
   // It can be useful to disable this to reduce DEBUG-compile time of large
@@ -284,6 +285,10 @@ DefaultJitOptions::DefaultJitOptions() {
       Warn(forcedRegisterAllocatorEnv, env);
     }
   }
+
+  SET_DEFAULT(linkStatsLoops, 50);
+  lowEntropyAction =
+      OnLowEntropyAction(GET_DEFAULT(lowEntropyAction, uint8_t(0)));
 
 #if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
     defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_RISCV64)

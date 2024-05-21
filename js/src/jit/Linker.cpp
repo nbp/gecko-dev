@@ -67,8 +67,9 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   if (!awjcf->makeWritable()) {
     return fail(cx);
   }
-  code->copyFrom(masm);
-  masm.link(code);
+  if (!masm.link(code, kind)) {
+    return fail(cx);
+  }
   if (masm.embedsNurseryPointers()) {
     cx->runtime()->gc.storeBuffer().putWholeCell(code);
   }

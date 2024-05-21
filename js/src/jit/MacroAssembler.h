@@ -5831,7 +5831,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   Label* failureLabel() { return &failureLabel_; }
 
   void finish();
-  void link(JitCode* code);
+  bool link(JitCode* code, CodeKind kind);
 
   void assumeUnreachable(const char* output);
 

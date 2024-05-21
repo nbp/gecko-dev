@@ -126,6 +126,12 @@ struct DefaultJitOptions {
   uint32_t wasmBatchIonThreshold;
   mozilla::Maybe<IonRegisterAllocator> forcedRegisterAllocator;
 
+  // Number of loops over the linking phase to evaluate the entropy of the
+  // generated code.
+  uint32_t linkStatsLoops;
+  enum OnLowEntropyAction : uint8_t { Ignore, Monitor, Skip, Crash };
+  OnLowEntropyAction lowEntropyAction;
+
   // Spectre mitigation flags. Each mitigation has its own flag in order to
   // measure the effectiveness of each mitigation with various proof of
   // concept.

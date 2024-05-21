@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "fdlibm.h"
+
 #include "jit/AtomicOp.h"
 #include "jit/AtomicOperations.h"
 #include "jit/Bailouts.h"
@@ -3998,9 +4000,137 @@ void MacroAssembler::finish() {
   }
 }
 
-void MacroAssembler::link(JitCode* code) {
+static double reportCodeEntropy(mozilla::Vector<uint8_t>& locByteFreq, size_t loops) {
+  if (!loops || locByteFreq.empty()) {
+    return 0.;
+  }
+  Sprinter out(nullptr, false);
+  if (!out.init()) {
+    return 0.;
+  }
+#ifdef VERBOSE_ENTROPY_REPORT
+  uint8_t bytes[8];
+  char chrs[8];
+  size_t i = 0;
+#endif
+  size_t numBytes = locByteFreq.length() / 256;
+  double totalEntropy = 0;
+  double minEntropy = loops;
+  for (size_t offset = 0; offset < numBytes; offset++) {
+#ifdef VERBOSE_ENTROPY_REPORT
+    out.printf("0x%08" PRIxPTR ":", offset);
+    char prefix = '\t';
+    for (; offset < numBytes; offset++) {
+      i = 0;
+#endif
+      double offsetEntropy = 0;
+      for (size_t byte = 0; byte < 256; byte++) {
+        uint8_t count = locByteFreq[offset * 256 + byte];
+#ifdef VERBOSE_ENTROPY_REPORT
+        if (count > loops / 2) {
+          bytes[i] = uint8_t(byte);
+          chrs[i++] = '*'; // above 50%
+        } else if (count > loops / 4) {
+          bytes[i] = uint8_t(byte);
+          chrs[i++] = '_'; // above 25%
+        } else if (count > loops / 8) {
+          bytes[i] = uint8_t(byte);
+          chrs[i++] = ' '; // above 12.5%
+        }
+#endif
+        if (count) {
+          double p = double(count) / double(loops);
+          offsetEntropy -= p * fdlibm_log2(p);
+        }
+      }
+      totalEntropy += offsetEntropy;
+      if (offsetEntropy < minEntropy) {
+        // TODO: Locations which are known to be referenced externally would
+        // have a 0 entropy per offset. Before, moving them to some allow-list,
+        // we should ensure that these sections of code are both minimal and
+        // contain no variable part.
+        minEntropy = offsetEntropy;
+      }
+
+#ifdef VERBOSE_ENTROPY_REPORT
+      out.putChar(prefix);
+      if (i == 1) {
+        out.printf("%02x", bytes[0]);
+      } else {
+        out.putChar('{');
+        for (size_t j = 0; j < i; j++) {
+          out.printf("%c%02x%c, ", chrs[j], bytes[j], chrs[j]);
+        }
+        out.put(".. }");
+      }
+      prefix = ' ';
+      if ((offset & 0xf) == 0xf) {
+        break;
+      }
+    }
+    out.putChar('\n');
+#endif
+  }
+  out.printf("Average entropy per offset: %.2f (= %.2f / %" PRIuPTR")\t",
+             totalEntropy / numBytes, totalEntropy, numBytes);
+  out.printf("Minimal entropy per offset: %.2f\n", minEntropy);
+  if (auto output = out.release()) {
+    fputs(output.get(), stderr);
+  }
+
+  return minEntropy;
+}
+
+bool MacroAssembler::link(JitCode* code, CodeKind kind) {
+  if (JitOptions.lowEntropyAction != DefaultJitOptions::Ignore &&
+      kind != CodeKind::Other) {
+    // Compute JIT code entropy across multiple linking phases to determine
+    // how our JIT Spraying mitigation are performing.
+    //
+    // This code computes the entropy per offset, which corresponds to the
+    // numbers of bits to be guessed to find out the byte which is present at a
+    // given location.
+    mozilla::Vector<uint8_t> locByteFreq;
+    if (!locByteFreq.appendN(0, 256 * code->bufferSize())) {
+      return false; // Out-of-memory repoted by the caller.
+    }
+    for (size_t loops = JitOptions.linkStatsLoops; loops; loops--) {
+      code->copyFrom(*this);
+      for (size_t index = 0; index < code->bufferSize(); index++) {
+        uint8_t byte = code->raw()[index];
+        uint8_t count = locByteFreq[index * 256 + byte];
+        count += count == 0xff ? 0 : 1;
+        locByteFreq[index * 256 + byte] = count;
+      }
+    }
+    double minEntropy =
+        reportCodeEntropy(locByteFreq, JitOptions.linkStatsLoops);
+
+    // If the entropy per offset is low, then decides what should be done.
+    if (minEntropy < 0.5) {
+      switch (JitOptions.lowEntropyAction) {
+      case DefaultJitOptions::Ignore:
+        MOZ_CRASH("Unexpected case.");
+        break;
+      case DefaultJitOptions::Monitor:
+        break;
+      case DefaultJitOptions::Skip:
+        // TODO: prevent the function from being recompiled as-is, instead of
+        // crashing because of a non-existent out-of-memory.
+        return false;
+      case DefaultJitOptions::Crash:
+        MOZ_CRASH("Low entropy of generated code is not acceptable");
+        return false;
+      }
+    }
+  }
+
+  // When making a code copy, we would add some non-determinism to make JIT
+  // Spraying implausible.
+  code->copyFrom(*this);
   MOZ_ASSERT(!oom());
   linkProfilerCallSites(code);
+  return true;
 }
 
 MacroAssembler::AutoProfilerCallInstrumentation::
