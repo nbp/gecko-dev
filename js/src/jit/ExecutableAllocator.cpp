@@ -84,7 +84,7 @@ size_t ExecutablePool::available() const {
   return m_end - m_freePtr;
 }
 
-ExecutableAllocator::~ExecutableAllocator() {
+ExecutablePoolAllocator::~ExecutablePoolAllocator() {
   for (size_t i = 0; i < m_smallPools.length(); i++) {
     m_smallPools[i]->release(/* willDestroy = */ true);
   }
@@ -93,7 +93,7 @@ ExecutableAllocator::~ExecutableAllocator() {
   MOZ_ASSERT(m_pools.empty());
 }
 
-ExecutablePool* ExecutableAllocator::poolForSize(size_t n) {
+ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
   // Try to fit in an existing small allocator.  Use the pool with the
   // least available space that is big enough (best-fit).  This is the
   // best strategy because (a) it maximizes the chance of the next
@@ -154,8 +154,8 @@ ExecutablePool* ExecutableAllocator::poolForSize(size_t n) {
 }
 
 /* static */
-size_t ExecutableAllocator::roundUpAllocationSize(size_t request,
-                                                  size_t granularity) {
+size_t ExecutablePoolAllocator::roundUpAllocationSize(size_t request,
+                                                      size_t granularity) {
   if ((std::numeric_limits<size_t>::max() - granularity) <= request) {
     return OVERSIZE_ALLOCATION;
   }
@@ -167,7 +167,7 @@ size_t ExecutableAllocator::roundUpAllocationSize(size_t request,
   return size;
 }
 
-ExecutablePool* ExecutableAllocator::createPool(size_t n) {
+ExecutablePool* ExecutablePoolAllocator::createPool(size_t n) {
   size_t allocSize = roundUpAllocationSize(n, ExecutableCodePageSize);
   if (allocSize == OVERSIZE_ALLOCATION) {
     return nullptr;
@@ -193,8 +193,8 @@ ExecutablePool* ExecutableAllocator::createPool(size_t n) {
   return pool;
 }
 
-void* ExecutableAllocator::alloc(JSContext* cx, size_t n,
-                                 ExecutablePool** poolp, CodeKind type) {
+void* ExecutablePoolAllocator::alloc(JSContext* cx, size_t n,
+                                     ExecutablePool** poolp, CodeKind type) {
   // Caller must ensure 'n' is word-size aligned. If all allocations are
   // of word sized quantities, then all subsequent allocations will be
   // aligned.
@@ -218,7 +218,7 @@ void* ExecutableAllocator::alloc(JSContext* cx, size_t n,
   return result;
 }
 
-void ExecutableAllocator::releasePoolPages(ExecutablePool* pool) {
+void ExecutablePoolAllocator::releasePoolPages(ExecutablePool* pool) {
   MOZ_ASSERT(pool->m_allocation.pages);
   systemRelease(pool->m_allocation);
 
@@ -228,7 +228,7 @@ void ExecutableAllocator::releasePoolPages(ExecutablePool* pool) {
   }
 }
 
-void ExecutableAllocator::purge() {
+void ExecutablePoolAllocator::purge() {
   for (size_t i = 0; i < m_smallPools.length();) {
     ExecutablePool* pool = m_smallPools[i];
     if (pool->m_refCount > 1) {
@@ -244,7 +244,7 @@ void ExecutableAllocator::purge() {
   }
 }
 
-void ExecutableAllocator::addSizeOfCode(JS::CodeSizes* sizes) const {
+void ExecutablePoolAllocator::addSizeOfCode(JS::CodeSizes* sizes) const {
   for (ExecPoolHashSet::Range r = m_pools.all(); !r.empty(); r.popFront()) {
     ExecutablePool* pool = r.front();
     sizes->ion += pool->m_codeBytes[CodeKind::Ion];
@@ -321,14 +321,14 @@ void ExecutableAllocator::poisonCode(JSRuntime* rt,
   }
 }
 
-ExecutablePool::Allocation ExecutableAllocator::systemAlloc(size_t n) {
+ExecutablePool::Allocation ExecutablePoolAllocator::systemAlloc(size_t n) {
   void* allocation = AllocateExecutableMemory(n, ProtectionSetting::Executable,
                                               MemCheckKind::MakeNoAccess);
   ExecutablePool::Allocation alloc = {reinterpret_cast<char*>(allocation), n};
   return alloc;
 }
 
-void ExecutableAllocator::systemRelease(
+void ExecutablePoolAllocator::systemRelease(
     const ExecutablePool::Allocation& alloc) {
   DeallocateExecutableMemory(alloc.pages, alloc.size);
 }

@@ -48,10 +48,12 @@ namespace jit {
 
 enum class CodeKind : uint8_t { Ion, Baseline, RegExp, Other, Count };
 
-class ExecutableAllocator;
+class ExecutablePoolAllocator;
 
 // These are reference-counted. A new one starts with a count of 1.
 class ExecutablePool {
+  friend class ExecutablePoolAllocator;
+  // Access internal to protect allocated regions.
   friend class ExecutableAllocator;
 
  private:
@@ -60,7 +62,7 @@ class ExecutablePool {
     size_t size;
   };
 
-  ExecutableAllocator* m_allocator;
+  ExecutablePoolAllocator* m_allocator;
   char* m_freePtr;
   char* m_end;
   Allocation m_allocation;
@@ -81,7 +83,7 @@ class ExecutablePool {
 
   void addRef();
 
-  ExecutablePool(ExecutableAllocator* allocator, Allocation a)
+  ExecutablePool(ExecutablePoolAllocator* allocator, Allocation a)
       : m_allocator(allocator),
         m_freePtr(a.pages),
         m_end(m_freePtr + a.size),
@@ -135,10 +137,10 @@ struct JitPoisonRange {
 
 typedef Vector<JitPoisonRange, 0, SystemAllocPolicy> JitPoisonRangeVector;
 
-class ExecutableAllocator {
+class ExecutablePoolAllocator {
  public:
-  ExecutableAllocator() = default;
-  ~ExecutableAllocator();
+  ExecutablePoolAllocator() = default;
+  ~ExecutablePoolAllocator();
 
   void purge();
 
@@ -163,11 +165,43 @@ class ExecutableAllocator {
   ExecutablePool* createPool(size_t n);
   ExecutablePool* poolForSize(size_t n);
 
-  static void reprotectPool(JSRuntime* rt, ExecutablePool* pool,
-                            ProtectionSetting protection,
-                            MustFlushICache flushICache);
+  ExecutablePoolAllocator(const ExecutablePoolAllocator&) = delete;
+  void operator=(const ExecutablePoolAllocator&) = delete;
 
+  // These are strong references;  they keep pools alive.
+  static const size_t maxSmallPools = 4;
+  typedef js::Vector<ExecutablePool*, maxSmallPools, js::SystemAllocPolicy>
+      SmallExecPoolVector;
+  SmallExecPoolVector m_smallPools;
+
+  // All live pools are recorded here, just for stats purposes.  These are
+  // weak references;  they don't keep pools alive.  When a pool is destroyed
+  // its reference is removed from m_pools.
+  typedef js::HashSet<ExecutablePool*, js::DefaultHasher<ExecutablePool*>,
+                      js::SystemAllocPolicy>
+      ExecPoolHashSet;
+  ExecPoolHashSet m_pools;  // All pools, just for stats purposes.
+};
+
+class ExecutableAllocator {
  public:
+  ExecutableAllocator() = default;
+  ~ExecutableAllocator() = default;
+
+  void purge() { poolAlloc.purge(); }
+
+  void* alloc(JSContext* cx, size_t n, ExecutablePool** poolp, CodeKind type) {
+    return poolAlloc.alloc(cx, n, poolp, type);
+  }
+
+  void releasePoolPages(ExecutablePool* pool) {
+    poolAlloc.releasePoolPages(pool);
+  }
+
+  void addSizeOfCode(JS::CodeSizes* sizes) const {
+    poolAlloc.addSizeOfCode(sizes);
+  }
+
   [[nodiscard]] static bool makeWritable(void* start, size_t size) {
     return ReprotectRegion(start, size, ProtectionSetting::Writable,
                            MustFlushICache::No);
@@ -185,19 +219,11 @@ class ExecutableAllocator {
   ExecutableAllocator(const ExecutableAllocator&) = delete;
   void operator=(const ExecutableAllocator&) = delete;
 
-  // These are strong references;  they keep pools alive.
-  static const size_t maxSmallPools = 4;
-  typedef js::Vector<ExecutablePool*, maxSmallPools, js::SystemAllocPolicy>
-      SmallExecPoolVector;
-  SmallExecPoolVector m_smallPools;
+  static void reprotectPool(JSRuntime* rt, ExecutablePool* pool,
+                            ProtectionSetting protection,
+                            MustFlushICache flushICache);
 
-  // All live pools are recorded here, just for stats purposes.  These are
-  // weak references;  they don't keep pools alive.  When a pool is destroyed
-  // its reference is removed from m_pools.
-  typedef js::HashSet<ExecutablePool*, js::DefaultHasher<ExecutablePool*>,
-                      js::SystemAllocPolicy>
-      ExecPoolHashSet;
-  ExecPoolHashSet m_pools;  // All pools, just for stats purposes.
+  ExecutablePoolAllocator poolAlloc;
 };
 
 }  // namespace jit
