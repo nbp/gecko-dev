@@ -144,19 +144,12 @@ class ExecutablePoolAllocator {
 
   void purge();
 
-  // alloc() returns a pointer to some memory, and also (by reference) a
-  // pointer to reference-counted pool. The caller owns a reference to the
-  // pool; i.e. alloc() increments the count before returning the object.
-  void* alloc(JSContext* cx, size_t n, ExecutablePool** poolp, CodeKind type);
-
   void releasePoolPages(ExecutablePool* pool);
 
   void addSizeOfCode(JS::CodeSizes* sizes) const;
 
  private:
-  static const size_t OVERSIZE_ALLOCATION = size_t(-1);
-
-  static size_t roundUpAllocationSize(size_t request, size_t granularity);
+  friend class ExecutableAllocator;
 
   // On OOM, this will return an Allocation where pages is nullptr.
   ExecutablePool::Allocation systemAlloc(size_t n);
@@ -190,9 +183,10 @@ class ExecutableAllocator {
 
   void purge() { poolAlloc.purge(); }
 
-  void* alloc(JSContext* cx, size_t n, ExecutablePool** poolp, CodeKind type) {
-    return poolAlloc.alloc(cx, n, poolp, type);
-  }
+  // alloc() returns a pointer to some memory, and also (by reference) a
+  // pointer to reference-counted pool. The caller owns a reference to the
+  // pool; i.e. alloc() increments the count before returning the object.
+  void* alloc(JSContext* cx, size_t n, ExecutablePool** poolp, CodeKind type);
 
   void releasePoolPages(ExecutablePool* pool) {
     poolAlloc.releasePoolPages(pool);

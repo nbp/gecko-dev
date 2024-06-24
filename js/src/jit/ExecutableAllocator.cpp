@@ -153,9 +153,8 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
   return pool;
 }
 
-/* static */
-size_t ExecutablePoolAllocator::roundUpAllocationSize(size_t request,
-                                                      size_t granularity) {
+static const size_t OVERSIZE_ALLOCATION = size_t(-1);
+static size_t roundUpAllocationSize(size_t request, size_t granularity) {
   if ((std::numeric_limits<size_t>::max() - granularity) <= request) {
     return OVERSIZE_ALLOCATION;
   }
@@ -193,8 +192,8 @@ ExecutablePool* ExecutablePoolAllocator::createPool(size_t n) {
   return pool;
 }
 
-void* ExecutablePoolAllocator::alloc(JSContext* cx, size_t n,
-                                     ExecutablePool** poolp, CodeKind type) {
+void* ExecutableAllocator::alloc(JSContext* cx, size_t n,
+                                 ExecutablePool** poolp, CodeKind type) {
   // Caller must ensure 'n' is word-size aligned. If all allocations are
   // of word sized quantities, then all subsequent allocations will be
   // aligned.
@@ -205,7 +204,8 @@ void* ExecutablePoolAllocator::alloc(JSContext* cx, size_t n,
     return nullptr;
   }
 
-  *poolp = poolForSize(n);
+  // Find or allocate an ExecutablePool which can host the requested allocation.
+  *poolp = poolAlloc.poolForSize(n);
   if (!*poolp) {
     return nullptr;
   }
