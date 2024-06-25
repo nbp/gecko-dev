@@ -48,7 +48,39 @@ namespace jit {
 
 enum class CodeKind : uint8_t { Ion, Baseline, RegExp, Other, Count };
 
+class ExecutablePool;
 class ExecutablePoolAllocator;
+
+struct Executable {
+  // Move the content out of the source, and reset all pointers from the source
+  // to keep only one reference to it.
+  explicit Executable(Executable&& src)
+      : xStart(std::exchange(src.xStart, nullptr)),
+        pool(std::exchange(src.pool, nullptr))
+  {};
+
+  // Memory location where the executable memory starts.
+  void* xStart;
+  // ExecutablePool in which the executable memory is allocated.
+  ExecutablePool* pool;
+
+  // To check for returned values.
+  operator bool() const {
+    MOZ_ASSERT_IF(xStart, pool);
+    return bool(xStart);
+  }
+
+ private:
+  // Only allow move operations outside of the ExecutableAllocator.
+  Executable() = delete;
+  explicit Executable(const Executable&) = delete;
+
+  // Only allow creation made by the ExecutableAllocator.
+  friend class ExecutableAllocator;
+  Executable(void* allocated, ExecutablePool* pool)
+      : xStart(allocated), pool(pool) {}
+  explicit Executable(nullptr_t) : xStart(nullptr), pool(nullptr) {}
+};
 
 // These are reference-counted. A new one starts with a count of 1.
 class ExecutablePool {
@@ -186,7 +218,7 @@ class ExecutableAllocator {
   // alloc() returns a pointer to some memory, and also (by reference) a
   // pointer to reference-counted pool. The caller owns a reference to the
   // pool; i.e. alloc() increments the count before returning the object.
-  void* alloc(JSContext* cx, size_t n, ExecutablePool** poolp, CodeKind type);
+  Executable alloc(JSContext* cx, size_t n, CodeKind type);
 
   void releasePoolPages(ExecutablePool* pool) {
     poolAlloc.releasePoolPages(pool);

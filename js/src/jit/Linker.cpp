@@ -41,22 +41,21 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
     return nullptr;
   }
 
-  ExecutablePool* pool;
-  uint8_t* result =
-      (uint8_t*)jitZone->execAlloc().alloc(cx, bytesNeeded, &pool, kind);
+  Executable result(jitZone->execAlloc().alloc(cx, bytesNeeded, kind));
   if (!result) {
     return fail(cx);
   }
 
   // The JitCodeHeader will be stored right before the code buffer.
-  uint8_t* codeStart = result + sizeof(JitCodeHeader);
+  uint8_t* execStart = (uint8_t*) result.xStart;
+  uint8_t* codeStart = execStart + sizeof(JitCodeHeader);
 
   // Bump the code up to a nice alignment.
   codeStart = (uint8_t*)AlignBytes((uintptr_t)codeStart, CodeAlignment);
-  MOZ_ASSERT(codeStart + masm.bytesNeeded() <= result + bytesNeeded);
-  uint32_t headerSize = codeStart - result;
+  MOZ_ASSERT(codeStart + masm.bytesNeeded() <= execStart + bytesNeeded);
+  uint32_t headerSize = codeStart - execStart;
   JitCode* code =
-      JitCode::New<NoGC>(cx, codeStart, bytesNeeded, headerSize, pool, kind);
+      JitCode::New<NoGC>(cx, std::move(result), bytesNeeded, headerSize, kind);
   if (!code) {
     return fail(cx);
   }

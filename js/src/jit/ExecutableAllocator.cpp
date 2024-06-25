@@ -192,30 +192,29 @@ ExecutablePool* ExecutablePoolAllocator::createPool(size_t n) {
   return pool;
 }
 
-void* ExecutableAllocator::alloc(JSContext* cx, size_t n,
-                                 ExecutablePool** poolp, CodeKind type) {
+Executable ExecutableAllocator::alloc(JSContext* cx, size_t n,
+                                      CodeKind type) {
   // Caller must ensure 'n' is word-size aligned. If all allocations are
   // of word sized quantities, then all subsequent allocations will be
   // aligned.
   MOZ_ASSERT(roundUpAllocationSize(n, sizeof(void*)) == n);
 
   if (n == OVERSIZE_ALLOCATION) {
-    *poolp = nullptr;
-    return nullptr;
+    return Executable(nullptr);
   }
 
   // Find or allocate an ExecutablePool which can host the requested allocation.
-  *poolp = poolAlloc.poolForSize(n);
-  if (!*poolp) {
-    return nullptr;
+  ExecutablePool* pool = poolAlloc.poolForSize(n);
+  if (!pool) {
+    return Executable(nullptr);
   }
 
   // This alloc is infallible because poolForSize() just obtained
   // (found, or created if necessary) a pool that had enough space.
-  void* result = (*poolp)->alloc(n, type);
+  void* result = pool->alloc(n, type);
   MOZ_ASSERT(result);
 
-  return result;
+  return Executable(result, pool);
 }
 
 void ExecutablePoolAllocator::releasePoolPages(ExecutablePool* pool) {

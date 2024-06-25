@@ -592,12 +592,13 @@ void JitCodeHeader::init(JitCode* jitCode) {
 }
 
 template <AllowGC allowGC>
-JitCode* JitCode::New(JSContext* cx, uint8_t* code, uint32_t totalSize,
-                      uint32_t headerSize, ExecutablePool* pool,
-                      CodeKind kind) {
+JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t totalSize,
+                      uint32_t headerSize, CodeKind kind) {
   uint32_t bufferSize = totalSize - headerSize;
+  // Copy to handle errors if we fail to allocate.
+  ExecutablePool* pool = exec.pool;
   JitCode* codeObj =
-      cx->newCell<JitCode, allowGC>(code, bufferSize, headerSize, pool, kind);
+    cx->newCell<JitCode, allowGC>(std::move(exec), bufferSize, headerSize, kind);
   if (!codeObj) {
     // The caller already allocated `totalSize` bytes of executable memory.
     pool->release(totalSize, kind);
@@ -609,13 +610,13 @@ JitCode* JitCode::New(JSContext* cx, uint8_t* code, uint32_t totalSize,
   return codeObj;
 }
 
-template JitCode* JitCode::New<CanGC>(JSContext* cx, uint8_t* code,
+template JitCode* JitCode::New<CanGC>(JSContext* cx, Executable&& exec,
                                       uint32_t bufferSize, uint32_t headerSize,
-                                      ExecutablePool* pool, CodeKind kind);
+                                      CodeKind kind);
 
-template JitCode* JitCode::New<NoGC>(JSContext* cx, uint8_t* code,
+template JitCode* JitCode::New<NoGC>(JSContext* cx, Executable&& exec,
                                      uint32_t bufferSize, uint32_t headerSize,
-                                     ExecutablePool* pool, CodeKind kind);
+                                     CodeKind kind);
 
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
@@ -667,16 +668,17 @@ void JitCode::finalize(JS::GCContext* gcx) {
   vtune::UnmarkCode(this);
 #endif
 
-  MOZ_ASSERT(pool_);
+  MOZ_ASSERT(executable_.pool);
 
   // With W^X JIT code, reprotecting memory for each JitCode instance is
   // slow, so we record the ranges and poison them later all at once. It's
   // safe to ignore OOM here, it just means we won't poison the code.
-  if (gcx->appendJitPoisonRange(JitPoisonRange(pool_, raw() - headerSize_,
+  if (gcx->appendJitPoisonRange(JitPoisonRange(executable_.pool,
+                                               executable_.xStart,
                                                headerSize_ + bufferSize_))) {
-    pool_->addRef();
+    executable_.pool->addRef();
   }
-  setHeaderPtr(nullptr);
+  executable_.xStart = nullptr;
 
 #ifdef JS_ION_PERF
   // Code buffers are stored inside ExecutablePools. Pools are refcounted.
@@ -684,15 +686,15 @@ void JitCode::finalize(JS::GCContext* gcx) {
   // integration, we don't want to reuse code addresses, so we just leak the
   // memory instead.
   if (!PerfEnabled()) {
-    pool_->release(headerSize_ + bufferSize_, CodeKind(kind_));
+    executable.pool->release(headerSize_ + bufferSize_, CodeKind(kind_));
   }
 #else
-  pool_->release(headerSize_ + bufferSize_, CodeKind(kind_));
+  executable_.pool->release(headerSize_ + bufferSize_, CodeKind(kind_));
 #endif
 
   zone()->decJitMemory(headerSize_ + bufferSize_);
 
-  pool_ = nullptr;
+  executable_.pool = nullptr;
 }
 
 IonScript::IonScript(IonCompilationId compilationId, uint32_t localSlotsSize,

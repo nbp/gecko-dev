@@ -44,11 +44,12 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   friend class gc::CellAllocator;
 
  public:
-  // Raw code pointer, stored in the cell header.
+  // Entry point used in the generated code, it corresponds to the
+  // aligned(Executable.xStart + sizeof(JitCodeHeader)
   uint8_t* raw() const { return headerPtr(); }
 
  protected:
-  ExecutablePool* pool_;
+  Executable executable_;  // Allocation
   uint32_t bufferSize_;  // Total buffer size. Does not include headerSize_.
   uint32_t insnSize_;    // Instruction stream size.
   uint32_t dataSize_;    // Size of the read-only data area.
@@ -63,10 +64,10 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint8_t localTracingSlots_;
 
   JitCode() = delete;
-  JitCode(uint8_t* code, uint32_t bufferSize, uint32_t headerSize,
-          ExecutablePool* pool, CodeKind kind)
-      : TenuredCellWithNonGCPointer(code),
-        pool_(pool),
+  JitCode(Executable&& exec, uint32_t bufferSize, uint32_t headerSize,
+          CodeKind kind)
+      : TenuredCellWithNonGCPointer(((uint8_t*) exec.xStart) + headerSize),
+        executable_(std::move(exec)),
         bufferSize_(bufferSize),
         insnSize_(0),
         dataSize_(0),
@@ -135,8 +136,8 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // object can be allocated, nullptr is returned. On failure, |pool| is
   // automatically released, so the code may be freed.
   template <AllowGC allowGC>
-  static JitCode* New(JSContext* cx, uint8_t* code, uint32_t totalSize,
-                      uint32_t headerSize, ExecutablePool* pool, CodeKind kind);
+  static JitCode* New(JSContext* cx, Executable&& exec, uint32_t totalSize,
+                      uint32_t headerSize, CodeKind kind);
 
  public:
   static const JS::TraceKind TraceKind = JS::TraceKind::JitCode;
