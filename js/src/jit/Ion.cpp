@@ -592,31 +592,27 @@ void JitCodeHeader::init(JitCode* jitCode) {
 }
 
 template <AllowGC allowGC>
-JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t totalSize,
-                      uint32_t headerSize, CodeKind kind) {
-  uint32_t bufferSize = totalSize - headerSize;
+JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t headerSize) {
   // Copy to handle errors if we fail to allocate.
   ExecutablePool* pool = exec.pool;
   JitCode* codeObj =
-    cx->newCell<JitCode, allowGC>(std::move(exec), bufferSize, headerSize, kind);
+    cx->newCell<JitCode, allowGC>(std::move(exec), headerSize);
   if (!codeObj) {
-    // The caller already allocated `totalSize` bytes of executable memory.
-    pool->release(totalSize, kind);
+    // The executable area has already been allocated.
+    pool->release(exec.desc.xSize, exec.desc.kind);
     return nullptr;
   }
 
-  cx->zone()->incJitMemory(totalSize);
+  cx->zone()->incJitMemory(exec.desc.xSize);
 
   return codeObj;
 }
 
 template JitCode* JitCode::New<CanGC>(JSContext* cx, Executable&& exec,
-                                      uint32_t bufferSize, uint32_t headerSize,
-                                      CodeKind kind);
+                                      uint32_t headerSize);
 
 template JitCode* JitCode::New<NoGC>(JSContext* cx, Executable&& exec,
-                                     uint32_t bufferSize, uint32_t headerSize,
-                                     CodeKind kind);
+                                     uint32_t headerSize);
 
 void JitCode::copyFrom(MacroAssembler& masm) {
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
@@ -675,7 +671,7 @@ void JitCode::finalize(JS::GCContext* gcx) {
   // safe to ignore OOM here, it just means we won't poison the code.
   if (gcx->appendJitPoisonRange(JitPoisonRange(executable_.pool,
                                                executable_.xStart,
-                                               headerSize_ + bufferSize_))) {
+                                               executable_.desc.xSize))) {
     executable_.pool->addRef();
   }
   executable_.xStart = nullptr;
@@ -686,13 +682,13 @@ void JitCode::finalize(JS::GCContext* gcx) {
   // integration, we don't want to reuse code addresses, so we just leak the
   // memory instead.
   if (!PerfEnabled()) {
-    executable.pool->release(headerSize_ + bufferSize_, CodeKind(kind_));
+    executable.pool->release(executable_.desc.xSize, executable_.desc.kind);
   }
 #else
-  executable_.pool->release(headerSize_ + bufferSize_, CodeKind(kind_));
+  executable_.pool->release(executable_.desc.xSize, executable_.desc.kind);
 #endif
 
-  zone()->decJitMemory(headerSize_ + bufferSize_);
+  zone()->decJitMemory(executable_.desc.xSize);
 
   executable_.pool = nullptr;
 }

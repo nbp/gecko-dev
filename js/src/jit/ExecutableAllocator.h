@@ -51,18 +51,32 @@ enum class CodeKind : uint8_t { Ion, Baseline, RegExp, Other, Count };
 class ExecutablePool;
 class ExecutablePoolAllocator;
 
+struct ExecutableDesc {
+  // Size of the executable memory area.
+  uint32_t xSize = 0;
+
+  // Reason used to allocate this memory, stored to report to the memory
+  // reporter.
+  CodeKind kind = CodeKind::Count;
+};
+
 struct Executable {
   // Move the content out of the source, and reset all pointers from the source
   // to keep only one reference to it.
   explicit Executable(Executable&& src)
       : xStart(std::exchange(src.xStart, nullptr)),
-        pool(std::exchange(src.pool, nullptr))
+        pool(std::exchange(src.pool, nullptr)),
+        desc(src.desc)
   {};
 
   // Memory location where the executable memory starts.
   void* xStart;
+
   // ExecutablePool in which the executable memory is allocated.
   ExecutablePool* pool;
+
+  // Description of the allocation content.
+  const ExecutableDesc desc;
 
   // To check for returned values.
   operator bool() const {
@@ -77,9 +91,9 @@ struct Executable {
 
   // Only allow creation made by the ExecutableAllocator.
   friend class ExecutableAllocator;
-  Executable(void* allocated, ExecutablePool* pool)
-      : xStart(allocated), pool(pool) {}
-  explicit Executable(nullptr_t) : xStart(nullptr), pool(nullptr) {}
+  Executable(void* allocated, ExecutablePool* pool, ExecutableDesc desc)
+      : xStart(allocated), pool(pool), desc(desc) {}
+  explicit Executable(nullptr_t) : xStart(nullptr), pool(nullptr), desc() {}
 };
 
 // These are reference-counted. A new one starts with a count of 1.
@@ -218,7 +232,7 @@ class ExecutableAllocator {
   // alloc() returns a pointer to some memory, and also (by reference) a
   // pointer to reference-counted pool. The caller owns a reference to the
   // pool; i.e. alloc() increments the count before returning the object.
-  Executable alloc(JSContext* cx, size_t n, CodeKind type);
+  Executable alloc(JSContext* cx, ExecutableDesc desc);
 
   void releasePoolPages(ExecutablePool* pool) {
     poolAlloc.releasePoolPages(pool);

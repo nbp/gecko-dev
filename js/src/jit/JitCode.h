@@ -16,17 +16,15 @@
 
 #include "gc/Cell.h"       // gc::TenuredCellWithNonGCPointer
 #include "gc/GCEnum.h"     // AllowGC
+#include "jit/ExecutableAllocator.h"  // Executable
 #include "js/TraceKind.h"  // JS::TraceKind
 #include "js/UbiNode.h"    // ubi::{TracerConcrete, Size, CourseType}
 
 namespace js {
 namespace jit {
 
-class ExecutablePool;
 class JitCode;
 class MacroAssembler;
-
-enum class CodeKind : uint8_t;
 
 // Header at start of raw code buffer
 struct JitCodeHeader {
@@ -50,13 +48,11 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
  protected:
   Executable executable_;  // Allocation
-  uint32_t bufferSize_;  // Total buffer size. Does not include headerSize_.
   uint32_t insnSize_;    // Instruction stream size.
   uint32_t dataSize_;    // Size of the read-only data area.
   uint32_t jumpRelocTableBytes_;  // Size of the jump relocation table.
   uint32_t dataRelocTableBytes_;  // Size of the data relocation table.
   uint8_t headerSize_ : 5;        // Number of bytes allocated before codeStart.
-  uint8_t kind_ : 3;              // jit::CodeKind, for the memory reporters.
   bool invalidated_ : 1;     // Whether the code object has been invalidated.
                              // This is necessary to prevent GC tracing.
   bool hasBytecodeMap_ : 1;  // Whether the code object has been registered with
@@ -64,21 +60,17 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint8_t localTracingSlots_;
 
   JitCode() = delete;
-  JitCode(Executable&& exec, uint32_t bufferSize, uint32_t headerSize,
-          CodeKind kind)
+  JitCode(Executable&& exec, uint32_t headerSize)
       : TenuredCellWithNonGCPointer(((uint8_t*) exec.xStart) + headerSize),
         executable_(std::move(exec)),
-        bufferSize_(bufferSize),
         insnSize_(0),
         dataSize_(0),
         jumpRelocTableBytes_(0),
         dataRelocTableBytes_(0),
         headerSize_(headerSize),
-        kind_(uint8_t(kind)),
         invalidated_(false),
         hasBytecodeMap_(false),
         localTracingSlots_(0) {
-    MOZ_ASSERT(CodeKind(kind_) == kind);
     MOZ_ASSERT(headerSize_ == headerSize);
   }
 
@@ -95,7 +87,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
     return raw() <= addr_u8 && addr_u8 < rawEnd();
   }
   size_t instructionsSize() const { return insnSize_; }
-  size_t bufferSize() const { return bufferSize_; }
+  size_t bufferSize() const { return executable_.desc.xSize - headerSize_; }
   size_t headerSize() const { return headerSize_; }
 
   void traceChildren(JSTracer* trc);
@@ -136,8 +128,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // object can be allocated, nullptr is returned. On failure, |pool| is
   // automatically released, so the code may be freed.
   template <AllowGC allowGC>
-  static JitCode* New(JSContext* cx, Executable&& exec, uint32_t totalSize,
-                      uint32_t headerSize, CodeKind kind);
+  static JitCode* New(JSContext* cx, Executable&& exec, uint32_t headerSize);
 
  public:
   static const JS::TraceKind TraceKind = JS::TraceKind::JitCode;

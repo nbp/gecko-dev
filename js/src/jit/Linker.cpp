@@ -41,7 +41,8 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
     return nullptr;
   }
 
-  Executable result(jitZone->execAlloc().alloc(cx, bytesNeeded, kind));
+  ExecutableDesc desc{bytesNeeded, kind};
+  Executable result(jitZone->execAlloc().alloc(cx, desc));
   if (!result) {
     return fail(cx);
   }
@@ -54,8 +55,7 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   codeStart = (uint8_t*)AlignBytes((uintptr_t)codeStart, CodeAlignment);
   MOZ_ASSERT(codeStart + masm.bytesNeeded() <= execStart + bytesNeeded);
   uint32_t headerSize = codeStart - execStart;
-  JitCode* code =
-      JitCode::New<NoGC>(cx, std::move(result), bytesNeeded, headerSize, kind);
+  JitCode* code = JitCode::New<NoGC>(cx, std::move(result), headerSize);
   if (!code) {
     return fail(cx);
   }
