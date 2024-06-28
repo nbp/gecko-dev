@@ -41,6 +41,7 @@
 
 namespace JS {
 struct CodeSizes;
+struct GCContext;
 }  // namespace JS
 
 namespace js {
@@ -69,6 +70,11 @@ struct Executable {
         desc(src.desc)
   {};
 
+  ~Executable() {
+    MOZ_ASSERT(!xStart, "The Executable has neither been moved nor discarded"
+               " before being destroyed.");
+  }
+
   // Memory location where the executable memory starts.
   void* xStart;
 
@@ -83,6 +89,17 @@ struct Executable {
     MOZ_ASSERT_IF(xStart, pool);
     return bool(xStart);
   }
+
+#ifdef DEBUG
+  void assertInvariants();
+#else
+  inline void assertInvariants() {}
+#endif
+
+  // Discard the current memory region, it should no longer be used after this
+  // call. All fields are reset once the memory is "released". The reclaiming of
+  // the memory happen when all allocations of an ExecutablePool are "released".
+  void discard(JS::GCContext* gcx);
 
  private:
   // Only allow move operations outside of the ExecutableAllocator.
@@ -101,6 +118,8 @@ class ExecutablePool {
   friend class ExecutablePoolAllocator;
   // Access internal to protect allocated regions.
   friend class ExecutableAllocator;
+  // Asserts that pages which are released are contained in the pool.
+  friend class Executable;
 
  private:
   struct Allocation {
@@ -125,7 +144,7 @@ class ExecutablePool {
 
  public:
   void release(bool willDestroy = false);
-  void release(size_t n, CodeKind kind);
+  void release(ExecutableDesc desc);
 
   void addRef();
 

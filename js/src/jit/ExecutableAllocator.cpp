@@ -27,10 +27,46 @@
 
 #include "jit/ExecutableAllocator.h"
 
+#include "gc/GCContext.h"
 #include "js/MemoryMetrics.h"
 #include "util/Poison.h"
 
 using namespace js::jit;
+
+#ifdef DEBUG
+void Executable::assertInvariants() {
+  MOZ_ASSERT_IF(xStart, pool);
+  MOZ_ASSERT_IF(pool, pool.pages < (uint8_t*) xStart);
+  MOZ_ASSERT_IF(pool, (uint8_t*) xStart + desc.xSize < pool.m_freePtr);
+}
+#endif
+
+void Executable::discard(JS::GCContext* gcx) {
+  MOZ_ASSERT(xStart);
+  assertInvariants();
+
+  // With W^X JIT code, reprotecting memory for each JitCode instance is
+  // slow, so we record the ranges and poison them later all at once. It's
+  // safe to ignore OOM here, it just means we won't poison the code.
+  if (gcx && gcx->appendJitPoisonRange(JitPoisonRange(pool, xStart, desc.xSize))) {
+    pool->addRef();
+  }
+
+#ifdef JS_ION_PERF
+  // Code buffers are stored inside ExecutablePools. Pools are refcounted.
+  // Releasing the pool may free it. Horrible hack: if we are using perf
+  // integration, we don't want to reuse code addresses, so we just leak the
+  // memory instead.
+  if (!PerfEnabled()) {
+    pool->release(desc);
+  }
+#else
+  pool->release(desc);
+#endif
+
+  xStart = nullptr;
+  pool = nullptr;
+}
 
 ExecutablePool::~ExecutablePool() {
 #ifdef DEBUG
@@ -52,9 +88,9 @@ void ExecutablePool::release(bool willDestroy) {
   }
 }
 
-void ExecutablePool::release(size_t n, CodeKind kind) {
-  m_codeBytes[kind] -= n;
-  MOZ_ASSERT(m_codeBytes[kind] < m_allocation.size);  // Shouldn't underflow.
+void ExecutablePool::release(ExecutableDesc desc) {
+  m_codeBytes[desc.kind] -= desc.xSize;
+  MOZ_ASSERT(m_codeBytes[desc.kind] < m_allocation.size);  // Shouldn't underflow.
 
   release();
 }

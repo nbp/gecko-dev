@@ -599,7 +599,7 @@ JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t headerSize) {
     cx->newCell<JitCode, allowGC>(std::move(exec), headerSize);
   if (!codeObj) {
     // The executable area has already been allocated.
-    pool->release(exec.desc.xSize, exec.desc.kind);
+    pool->release(exec.desc);
     return nullptr;
   }
 
@@ -664,33 +664,9 @@ void JitCode::finalize(JS::GCContext* gcx) {
   vtune::UnmarkCode(this);
 #endif
 
-  MOZ_ASSERT(executable_.pool);
-
-  // With W^X JIT code, reprotecting memory for each JitCode instance is
-  // slow, so we record the ranges and poison them later all at once. It's
-  // safe to ignore OOM here, it just means we won't poison the code.
-  if (gcx->appendJitPoisonRange(JitPoisonRange(executable_.pool,
-                                               executable_.xStart,
-                                               executable_.desc.xSize))) {
-    executable_.pool->addRef();
-  }
-  executable_.xStart = nullptr;
-
-#ifdef JS_ION_PERF
-  // Code buffers are stored inside ExecutablePools. Pools are refcounted.
-  // Releasing the pool may free it. Horrible hack: if we are using perf
-  // integration, we don't want to reuse code addresses, so we just leak the
-  // memory instead.
-  if (!PerfEnabled()) {
-    executable.pool->release(executable_.desc.xSize, executable_.desc.kind);
-  }
-#else
-  executable_.pool->release(executable_.desc.xSize, executable_.desc.kind);
-#endif
-
+  executable_.discard(gcx);
   zone()->decJitMemory(executable_.desc.xSize);
 
-  executable_.pool = nullptr;
 }
 
 IonScript::IonScript(IonCompilationId compilationId, uint32_t localSlotsSize,
