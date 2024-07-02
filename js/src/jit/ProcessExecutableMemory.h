@@ -80,7 +80,7 @@ enum class MustFlushICache { No, Yes };
 [[nodiscard]] extern bool InitProcessExecutableMemory();
 extern void ReleaseProcessExecutableMemory();
 
-// Allocate/deallocate executable pages.
+// Allocate/deallocate executable pages with their associated data section.
 extern void* AllocateExecutableMemory(size_t bytes,
                                       ProtectionSetting protection,
                                       MemCheckKind checkKind);

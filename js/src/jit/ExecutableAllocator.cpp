@@ -88,7 +88,7 @@ void ExecutablePool::release(bool willDestroy) {
   }
 }
 
-void ExecutablePool::release(ExecutableDesc desc) {
+void ExecutablePool::release(const ExecutableDesc& desc) {
   m_codeBytes[desc.kind] -= desc.xSize;
   MOZ_ASSERT(m_codeBytes[desc.kind] < m_allocation.size);  // Shouldn't underflow.
 
@@ -104,15 +104,15 @@ void ExecutablePool::addRef() {
   MOZ_ASSERT(m_refCount, "refcount overflow");
 }
 
-void* ExecutablePool::alloc(size_t n, CodeKind kind) {
-  MOZ_ASSERT(n <= available());
+Executable ExecutablePool::alloc(const ExecutableDesc& desc) {
+  MOZ_ASSERT(desc.xSize <= available());
   void* result = m_freePtr;
-  m_freePtr += n;
+  m_freePtr += desc.xSize;
 
-  m_codeBytes[kind] += n;
+  m_codeBytes[desc.kind] += desc.xSize;
 
-  MOZ_MAKE_MEM_UNDEFINED(result, n);
-  return result;
+  MOZ_MAKE_MEM_UNDEFINED(result, desc.xSize);
+  return Executable(result, this, desc);
 }
 
 size_t ExecutablePool::available() const {
@@ -129,7 +129,8 @@ ExecutablePoolAllocator::~ExecutablePoolAllocator() {
   MOZ_ASSERT(m_pools.empty());
 }
 
-ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
+ExecutablePool* ExecutablePoolAllocator::poolForSize(
+    const ExecutableDesc& least) {
   // Try to fit in an existing small allocator.  Use the pool with the
   // least available space that is big enough (best-fit).  This is the
   // best strategy because (a) it maximizes the chance of the next
@@ -138,7 +139,7 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
   ExecutablePool* minPool = nullptr;
   for (size_t i = 0; i < m_smallPools.length(); i++) {
     ExecutablePool* pool = m_smallPools[i];
-    if (n <= pool->available() &&
+    if (least.xSize <= pool->available() &&
         (!minPool || pool->available() < minPool->available())) {
       minPool = pool;
     }
@@ -149,12 +150,12 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
   }
 
   // If the request is large, we just provide a unshared allocator
-  if (n > ExecutableCodePageSize) {
-    return createPool(n);
+  if (least.xSize > ExecutableCodePageSize) {
+    return createPool(least);
   }
 
   // Create a new allocator
-  ExecutablePool* pool = createPool(ExecutableCodePageSize);
+  ExecutablePool* pool = createPool({ExecutableCodePageSize, CodeKind::Other});
   if (!pool) {
     return nullptr;
   }
@@ -178,7 +179,7 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(size_t n) {
     // If the new allocator will result in more free space than the small
     // pool with the least space, then we will use it instead
     ExecutablePool* minPool = m_smallPools[iMin];
-    if ((pool->available() - n) > minPool->available()) {
+    if ((pool->available() - least.xSize) > minPool->available()) {
       minPool->release();
       m_smallPools[iMin] = pool;
       pool->addRef();
@@ -202,8 +203,9 @@ static size_t roundUpAllocationSize(size_t request, size_t granularity) {
   return size;
 }
 
-ExecutablePool* ExecutablePoolAllocator::createPool(size_t n) {
-  size_t allocSize = roundUpAllocationSize(n, ExecutableCodePageSize);
+ExecutablePool* ExecutablePoolAllocator::createPool(
+    const ExecutableDesc& least) {
+  size_t allocSize = roundUpAllocationSize(least.xSize, ExecutableCodePageSize);
   if (allocSize == OVERSIZE_ALLOCATION) {
     return nullptr;
   }
@@ -228,7 +230,7 @@ ExecutablePool* ExecutablePoolAllocator::createPool(size_t n) {
   return pool;
 }
 
-Executable ExecutableAllocator::alloc(JSContext* cx, ExecutableDesc desc) {
+Executable ExecutableAllocator::alloc(JSContext* cx, const ExecutableDesc& desc) {
   // Caller must ensure 'n' is word-size aligned. If all allocations are
   // of word sized quantities, then all subsequent allocations will be
   // aligned.
@@ -240,17 +242,17 @@ Executable ExecutableAllocator::alloc(JSContext* cx, ExecutableDesc desc) {
   }
 
   // Find or allocate an ExecutablePool which can host the requested allocation.
-  ExecutablePool* pool = poolAlloc.poolForSize(desc.xSize);
+  ExecutablePool* pool = poolAlloc.poolForSize(desc);
   if (!pool) {
     return Executable(nullptr);
   }
 
   // This alloc is infallible because poolForSize() just obtained
   // (found, or created if necessary) a pool that had enough space.
-  void* result = pool->alloc(desc.xSize, desc.kind);
+  Executable result(pool->alloc(desc));
   MOZ_ASSERT(result);
 
-  return Executable(result, pool, desc);
+  return Executable(std::move(result));
 }
 
 void ExecutablePoolAllocator::releasePoolPages(ExecutablePool* pool) {

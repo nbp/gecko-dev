@@ -107,8 +107,9 @@ struct Executable {
   explicit Executable(const Executable&) = delete;
 
   // Only allow creation made by the ExecutableAllocator.
+  friend class ExecutablePool;
   friend class ExecutableAllocator;
-  Executable(void* allocated, ExecutablePool* pool, ExecutableDesc desc)
+  Executable(void* allocated, ExecutablePool* pool, const ExecutableDesc& desc)
       : xStart(allocated), pool(pool), desc(desc) {}
   explicit Executable(nullptr_t) : xStart(nullptr), pool(nullptr), desc() {}
 };
@@ -144,7 +145,7 @@ class ExecutablePool {
 
  public:
   void release(bool willDestroy = false);
-  void release(ExecutableDesc desc);
+  void release(const ExecutableDesc& desc);
 
   void addRef();
 
@@ -176,7 +177,7 @@ class ExecutablePool {
   ExecutablePool(const ExecutablePool&) = delete;
   void operator=(const ExecutablePool&) = delete;
 
-  void* alloc(size_t n, CodeKind kind);
+  Executable alloc(const ExecutableDesc& desc);
 
   size_t available() const;
 
@@ -220,8 +221,8 @@ class ExecutablePoolAllocator {
   ExecutablePool::Allocation systemAlloc(size_t n);
   static void systemRelease(const ExecutablePool::Allocation& alloc);
 
-  ExecutablePool* createPool(size_t n);
-  ExecutablePool* poolForSize(size_t n);
+  ExecutablePool* createPool(const ExecutableDesc& least);
+  ExecutablePool* poolForSize(const ExecutableDesc& least);
 
   ExecutablePoolAllocator(const ExecutablePoolAllocator&) = delete;
   void operator=(const ExecutablePoolAllocator&) = delete;
@@ -251,7 +252,7 @@ class ExecutableAllocator {
   // alloc() returns a pointer to some memory, and also (by reference) a
   // pointer to reference-counted pool. The caller owns a reference to the
   // pool; i.e. alloc() increments the count before returning the object.
-  Executable alloc(JSContext* cx, ExecutableDesc desc);
+  Executable alloc(JSContext* cx, const ExecutableDesc& desc);
 
   void releasePoolPages(ExecutablePool* pool) {
     poolAlloc.releasePoolPages(pool);
