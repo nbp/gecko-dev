@@ -56,6 +56,9 @@ struct ExecutableDesc {
   // Size of the executable memory area.
   uint32_t xSize = 0;
 
+  // Size of the data read-only memory area.
+  uint32_t roSize = 0;
+
   // Reason used to allocate this memory, stored to report to the memory
   // reporter.
   CodeKind kind = CodeKind::Count;
@@ -66,6 +69,7 @@ struct Executable {
   // to keep only one reference to it.
   explicit Executable(Executable&& src)
       : xStart(std::exchange(src.xStart, nullptr)),
+        roStart(std::exchange(src.roStart, nullptr)),
         pool(std::exchange(src.pool, nullptr)),
         desc(src.desc)
   {};
@@ -78,6 +82,9 @@ struct Executable {
   // Memory location where the executable memory starts.
   void* xStart;
 
+  // Memory location where the read-only data memory starts.
+  void* roStart;
+
   // ExecutablePool in which the executable memory is allocated.
   ExecutablePool* pool;
 
@@ -87,6 +94,7 @@ struct Executable {
   // To check for returned values.
   operator bool() const {
     MOZ_ASSERT_IF(xStart, pool);
+    MOZ_ASSERT_IF(roStart, pool);
     return bool(xStart);
   }
 
@@ -109,9 +117,11 @@ struct Executable {
   // Only allow creation made by the ExecutableAllocator.
   friend class ExecutablePool;
   friend class ExecutableAllocator;
-  Executable(void* allocated, ExecutablePool* pool, const ExecutableDesc& desc)
-      : xStart(allocated), pool(pool), desc(desc) {}
-  explicit Executable(nullptr_t) : xStart(nullptr), pool(nullptr), desc() {}
+  Executable(void* xAlloc, void* roAlloc, ExecutablePool* pool,
+             const ExecutableDesc& desc)
+      : xStart(xAlloc), roStart(roAlloc), pool(pool), desc(desc) {}
+  explicit Executable(nullptr_t)
+      : xStart(nullptr), roStart(nullptr), pool(nullptr), desc() {}
 };
 
 // These are reference-counted. A new one starts with a count of 1.

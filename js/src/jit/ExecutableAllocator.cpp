@@ -108,11 +108,9 @@ Executable ExecutablePool::alloc(const ExecutableDesc& desc) {
   MOZ_ASSERT(desc.xSize <= available());
   void* result = m_freePtr;
   m_freePtr += desc.xSize;
-
   m_codeBytes[desc.kind] += desc.xSize;
-
-  MOZ_MAKE_MEM_UNDEFINED(result, desc.xSize);
-  return Executable(result, this, desc);
+  MOZ_MAKE_MEM_UNDEFINED(xResult, desc.xSize);
+  return Executable(result, nullptr, this, nullptr, desc);
 }
 
 size_t ExecutablePool::available() const {
@@ -155,7 +153,7 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(
   }
 
   // Create a new allocator
-  ExecutablePool* pool = createPool({ExecutableCodePageSize, CodeKind::Other});
+  ExecutablePool* pool = createPool({ExecutableCodePageSize, 0, CodeKind::Other});
   if (!pool) {
     return nullptr;
   }

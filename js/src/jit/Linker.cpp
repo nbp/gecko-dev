@@ -6,6 +6,7 @@
 
 #include "jit/Linker.h"
 
+#include "mozilla/Casting.h"
 #include "jit/JitZone.h"
 #include "util/Memory.h"
 
@@ -41,7 +42,8 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
     return nullptr;
   }
 
-  ExecutableDesc desc{bytesNeeded, kind};
+  using mozilla::AssertedCast;
+  ExecutableDesc desc{AssertedCast<uint32_t>(bytesNeeded), 0, kind};
   Executable result(jitZone->execAlloc().alloc(cx, desc));
   if (!result) {
     return fail(cx);
