@@ -49,7 +49,6 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
  protected:
   Executable executable_;  // Allocation
   uint32_t insnSize_;    // Instruction stream size.
-  uint32_t dataSize_;    // Size of the read-only data area.
   uint32_t jumpRelocTableBytes_;  // Size of the jump relocation table.
   uint32_t dataRelocTableBytes_;  // Size of the data relocation table.
   uint8_t headerSize_ : 5;        // Number of bytes allocated before codeStart.
@@ -64,7 +63,6 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
       : TenuredCellWithNonGCPointer(((uint8_t*) exec.xStart) + headerSize),
         executable_(std::move(exec)),
         insnSize_(0),
-        dataSize_(0),
         jumpRelocTableBytes_(0),
         dataRelocTableBytes_(0),
         headerSize_(headerSize),
@@ -75,7 +73,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   }
 
   uint32_t dataOffset() const { return insnSize_; }
-  uint32_t jumpRelocTableOffset() const { return dataOffset() + dataSize_; }
+  uint32_t jumpRelocTableOffset() const { return dataOffset(); }
   uint32_t dataRelocTableOffset() const {
     return jumpRelocTableOffset() + jumpRelocTableBytes_;
   }
