@@ -77,8 +77,8 @@ enum class MustFlushICache { No, Yes };
 
 // Functions called at process start-up/shutdown to initialize/release the
 // executable memory region.
-[[nodiscard]] extern bool InitProcessExecutableMemory();
-extern void ReleaseProcessExecutableMemory();
+[[nodiscard]] extern bool InitProcessJitMemory();
+extern void ReleaseProcessJitMemory();
 
 // Allocate/deallocate executable pages with their associated data section.
 extern void* AllocateExecutableMemory(size_t bytes,
@@ -135,4 +135,4 @@ class MOZ_RAII AutoMarkJitCodeWritableForThread {
 }  // namespace jit
 }  // namespace js
 
-#endif  // jit_ProcessExecutableMemory_h
+#endif  // jit_ProcessJitMemory_h

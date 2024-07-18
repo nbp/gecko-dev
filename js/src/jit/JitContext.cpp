@@ -125,7 +125,7 @@ bool jit::InitializeJit() {
       MacroAssembler::SupportsUnalignedAccesses();
 
   if (HasJitBackend()) {
-    if (!InitProcessExecutableMemory()) {
+    if (!InitProcessJitMemory()) {
       return false;
     }
   }
@@ -136,7 +136,7 @@ bool jit::InitializeJit() {
 
 void jit::ShutdownJit() {
   if (HasJitBackend() && !JSRuntime::hasLiveRuntimes()) {
-    ReleaseProcessExecutableMemory();
+    ReleaseProcessJitMemory();
   }
 }
 
