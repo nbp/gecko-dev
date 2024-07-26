@@ -118,16 +118,70 @@ size_t ExecutablePool::available() const {
   return m_end - m_freePtr;
 }
 
+ReadOnlyPool::~ReadOnlyPool() {
+#ifdef DEBUG
+  for (size_t bytes : m_dataBytes) {
+    MOZ_ASSERT(bytes == 0);
+  }
+#endif
+
+  MOZ_ASSERT(!isMarked());
+
+  m_allocator->releasePoolPages(this);
+}
+
+void ReadOnlyPool::release(bool willDestroy) {
+  MOZ_ASSERT(m_refCount != 0);
+  MOZ_ASSERT_IF(willDestroy, m_refCount == 1);
+  if (--m_refCount == 0) {
+    js_delete(this);
+  }
+}
+
+void ReadOnlyPool::release(const ExecutableDesc& desc) {
+  m_dataBytes[desc.kind] -= desc.roSize;
+  MOZ_ASSERT(m_dataBytes[desc.kind] < m_allocation.size);  // Shouldn't underflow.
+
+  release();
+}
+
+void ReadOnlyPool::addRef() {
+  // It should be impossible for us to roll over, because only small
+  // pools have multiple holders, and they have one holder per chunk
+  // of generated data, and they only hold 16KB or so of data.
+  MOZ_ASSERT(m_refCount);
+  ++m_refCount;
+  MOZ_ASSERT(m_refCount, "refcount overflow");
+}
+
+Executable ReadOnlyPool::alloc(const ExecutableDesc& desc) {
+  MOZ_ASSERT(desc.roSize <= available());
+  void* result = m_freePtr;
+  m_freePtr += desc.roSize;
+  m_dataBytes[desc.kind] += desc.roSize;
+  MOZ_MAKE_MEM_UNDEFINED(xResult, desc.roSize);
+  return Executable(nullptr, result, nullptr, this, desc);
+}
+
+size_t ReadOnlyPool::available() const {
+  MOZ_ASSERT(m_end >= m_freePtr);
+  return m_end - m_freePtr;
+}
+
 ExecutablePoolAllocator::~ExecutablePoolAllocator() {
-  for (size_t i = 0; i < m_smallPools.length(); i++) {
-    m_smallPools[i]->release(/* willDestroy = */ true);
+  for (size_t i = 0; i < smallExecPools.length(); i++) {
+    smallExecPools[i]->release(/* willDestroy = */ true);
+  }
+
+  for (size_t i = 0; i < smallDataPools.length(); i++) {
+    smallDataPools[i]->release(/* willDestroy = */ true);
   }
 
   // If this asserts we have a pool leak.
   MOZ_ASSERT(m_pools.empty());
 }
 
-ExecutablePool* ExecutablePoolAllocator::poolForSize(
+ExecutablePool* ExecutablePoolAllocator::execPoolForSize(
     const ExecutableDesc& least) {
   // Try to fit in an existing small allocator.  Use the pool with the
   // least available space that is big enough (best-fit).  This is the
@@ -135,8 +189,8 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(
   // allocation fitting in a small pool, and (b) it minimizes the
   // potential waste when a small pool is next abandoned.
   ExecutablePool* minPool = nullptr;
-  for (size_t i = 0; i < m_smallPools.length(); i++) {
-    ExecutablePool* pool = m_smallPools[i];
+  for (size_t i = 0; i < smallExecPools.length(); i++) {
+    ExecutablePool* pool = smallExecPools[i];
     if (least.xSize <= pool->available() &&
         (!minPool || pool->available() < minPool->available())) {
       minPool = pool;
@@ -149,37 +203,98 @@ ExecutablePool* ExecutablePoolAllocator::poolForSize(
 
   // If the request is large, we just provide a unshared allocator
   if (least.xSize > ExecutableCodePageSize) {
-    return createPool(least);
+    return createExecPool(least);
   }
 
   // Create a new allocator
-  ExecutablePool* pool = createPool({ExecutableCodePageSize, 0, CodeKind::Other});
+  ExecutablePool* pool = createExecPool({ExecutableCodePageSize, 0, CodeKind::Other});
   if (!pool) {
     return nullptr;
   }
   // At this point, local |pool| is the owner.
 
-  if (m_smallPools.length() < maxSmallPools) {
+  if (smallExecPools.length() < maxSmallPools) {
     // We haven't hit the maximum number of live pools; add the new pool.
     // If append() OOMs, we just return an unshared allocator.
-    if (m_smallPools.append(pool)) {
+    if (smallExecPools.append(pool)) {
       pool->addRef();
     }
   } else {
     // Find the pool with the least space.
     int iMin = 0;
-    for (size_t i = 1; i < m_smallPools.length(); i++) {
-      if (m_smallPools[i]->available() < m_smallPools[iMin]->available()) {
+    for (size_t i = 1; i < smallExecPools.length(); i++) {
+      if (smallExecPools[i]->available() < smallExecPools[iMin]->available()) {
         iMin = i;
       }
     }
 
     // If the new allocator will result in more free space than the small
     // pool with the least space, then we will use it instead
-    ExecutablePool* minPool = m_smallPools[iMin];
+    ExecutablePool* minPool = smallExecPools[iMin];
     if ((pool->available() - least.xSize) > minPool->available()) {
       minPool->release();
-      m_smallPools[iMin] = pool;
+      smallExecPools[iMin] = pool;
+      pool->addRef();
+    }
+  }
+
+  // Pass ownership to the caller.
+  return pool;
+}
+
+ReadOnlyPool* ExecutablePoolAllocator::dataPoolForSize(
+    const ExecutableDesc& least) {
+  // Try to fit in an existing small allocator.  Use the pool with the
+  // least available space that is big enough (best-fit).  This is the
+  // best strategy because (a) it maximizes the chance of the next
+  // allocation fitting in a small pool, and (b) it minimizes the
+  // potential waste when a small pool is next abandoned.
+  ReadOnlyPool* minPool = nullptr;
+  for (size_t i = 0; i < smallDataPools.length(); i++) {
+    ReadOnlyPool* pool = smallDataPools[i];
+    if (least.roSize <= pool->available() &&
+        (!minPool || pool->available() < minPool->available())) {
+      minPool = pool;
+    }
+  }
+  if (minPool) {
+    minPool->addRef();
+    return minPool;
+  }
+
+  // If the request is large, we just provide a unshared allocator
+  if (least.roSize > ReadOnlyDataPageSize) {
+    return createDataPool(least);
+  }
+
+  // Create a new allocator
+  ReadOnlyPool* pool = createDataPool({ReadOnlyDataPageSize, 0, CodeKind::Other});
+  if (!pool) {
+    return nullptr;
+  }
+  // At this point, local |pool| is the owner.
+
+  if (smallDataPools.length() < maxSmallPools) {
+    // We haven't hit the maximum number of live pools; add the new pool.
+    // If append() OOMs, we just return an unshared allocator.
+    if (smallDataPools.append(pool)) {
+      pool->addRef();
+    }
+  } else {
+    // Find the pool with the least space.
+    int iMin = 0;
+    for (size_t i = 1; i < smallDataPools.length(); i++) {
+      if (smallDataPools[i]->available() < smallDataPools[iMin]->available()) {
+        iMin = i;
+      }
+    }
+
+    // If the new allocator will result in more free space than the small
+    // pool with the least space, then we will use it instead
+    ReadOnlyPool* minPool = smallDataPools[iMin];
+    if ((pool->available() - least.roSize) > minPool->available()) {
+      minPool->release();
+      smallDataPools[iMin] = pool;
       pool->addRef();
     }
   }
@@ -201,26 +316,53 @@ static size_t roundUpAllocationSize(size_t request, size_t granularity) {
   return size;
 }
 
-ExecutablePool* ExecutablePoolAllocator::createPool(
+ExecutablePool* ExecutablePoolAllocator::createExecPool(
     const ExecutableDesc& least) {
   size_t allocSize = roundUpAllocationSize(least.xSize, ExecutableCodePageSize);
   if (allocSize == OVERSIZE_ALLOCATION) {
     return nullptr;
   }
 
-  ExecutablePool::Allocation a = systemAlloc(allocSize);
+  ExecutablePool::Allocation a = systemExecAlloc(allocSize);
   if (!a.pages) {
     return nullptr;
   }
 
   ExecutablePool* pool = js_new<ExecutablePool>(this, a);
   if (!pool) {
-    systemRelease(a);
+    systemExecRelease(a);
     return nullptr;
   }
 
-  if (!m_pools.put(pool)) {
-    // Note: this will call |systemRelease(a)|.
+  if (!xPools.put(pool)) {
+    // Note: this will call |systemExecRelease(a)|.
+    js_delete(pool);
+    return nullptr;
+  }
+
+  return pool;
+}
+
+ReadOnlyPool* ExecutablePoolAllocator::createDataPool(
+    const ExecutableDesc& least) {
+  size_t allocSize = roundUpAllocationSize(least.roSize, ReadOnlyDataPageSize);
+  if (allocSize == OVERSIZE_ALLOCATION) {
+    return nullptr;
+  }
+
+  ReadOnlyPool::Allocation a = systemDataAlloc(allocSize);
+  if (!a.pages) {
+    return nullptr;
+  }
+
+  ReadOnlyPool* pool = js_new<ReadOnlyPool>(this, a);
+  if (!pool) {
+    systemDataRelease(a);
+    return nullptr;
+  }
+
+  if (!roPools.put(pool)) {
+    // Note: this will call |systemDataRelease(a)|.
     js_delete(pool);
     return nullptr;
   }
@@ -240,32 +382,57 @@ Executable ExecutableAllocator::alloc(JSContext* cx, const ExecutableDesc& desc)
   }
 
   // Find or allocate an ExecutablePool which can host the requested allocation.
-  ExecutablePool* pool = poolAlloc.poolForSize(desc);
-  if (!pool) {
+  ExecutablePool* execPool = poolAlloc.execPoolForSize(desc);
+  if (!execPool) {
+    return Executable(nullptr);
+  }
+
+  if (!desc.roSize) {
+    // This alloc is infallible because poolForSize() just obtained
+    // (found, or created if necessary) a pool that had enough space.
+    Executable result(execPool->alloc(desc));
+    MOZ_RELEASE_ASSERT(result);
+
+    return Executable(std::move(result));
+  }
+
+  // Find or allocate an ExecutablePool which can host the requested allocation.
+  ReadOnlyPool* dataPool = poolAlloc.dataPoolForSize(desc);
+  if (!dataPool) {
     return Executable(nullptr);
   }
 
   // This alloc is infallible because poolForSize() just obtained
   // (found, or created if necessary) a pool that had enough space.
-  Executable result(pool->alloc(desc));
-  MOZ_ASSERT(result);
+  Executable result(execPool->alloc(desc), dataPool->alloc(desc));
+  MOZ_RELEASE_ASSERT(result);
 
   return Executable(std::move(result));
 }
 
 void ExecutablePoolAllocator::releasePoolPages(ExecutablePool* pool) {
   MOZ_ASSERT(pool->m_allocation.pages);
-  systemRelease(pool->m_allocation);
+  systemExecRelease(pool->m_allocation);
 
   // Pool may not be present in m_pools if we hit OOM during creation.
-  if (auto ptr = m_pools.lookup(pool)) {
-    m_pools.remove(ptr);
+  if (auto ptr = xPools.lookup(pool)) {
+    xPools.remove(ptr);
+  }
+}
+
+void ExecutablePoolAllocator::releasePoolPages(ReadOnlyPool* pool) {
+  MOZ_ASSERT(pool->m_allocation.pages);
+  systemDataRelease(pool->m_allocation);
+
+  // Pool may not be present in m_pools if we hit OOM during creation.
+  if (auto ptr = roPools.lookup(pool)) {
+    roPools.remove(ptr);
   }
 }
 
 void ExecutablePoolAllocator::purge() {
-  for (size_t i = 0; i < m_smallPools.length();) {
-    ExecutablePool* pool = m_smallPools[i];
+  for (size_t i = 0; i < smallExecPools.length();) {
+    ExecutablePool* pool = smallExecPools[i];
     if (pool->m_refCount > 1) {
       // Releasing this pool is not going to deallocate it, so we might as
       // well hold on to it and reuse it for future allocations.
@@ -275,18 +442,41 @@ void ExecutablePoolAllocator::purge() {
 
     MOZ_ASSERT(pool->m_refCount == 1);
     pool->release();
-    m_smallPools.erase(&m_smallPools[i]);
+    smallExecPools.erase(&smallExecPools[i]);
+  }
+
+  for (size_t i = 0; i < smallDataPools.length();) {
+    ReadOnlyPool* pool = smallDataPools[i];
+    if (pool->m_refCount > 1) {
+      // Releasing this pool is not going to deallocate it, so we might as
+      // well hold on to it and reuse it for future allocations.
+      i++;
+      continue;
+    }
+
+    MOZ_ASSERT(pool->m_refCount == 1);
+    pool->release();
+    smallDataPools.erase(&smallDataPools[i]);
   }
 }
 
 void ExecutablePoolAllocator::addSizeOfCode(JS::CodeSizes* sizes) const {
-  for (ExecPoolHashSet::Range r = m_pools.all(); !r.empty(); r.popFront()) {
+  for (ExecPoolHashSet::Range r = xPools.all(); !r.empty(); r.popFront()) {
     ExecutablePool* pool = r.front();
     sizes->ion += pool->m_codeBytes[CodeKind::Ion];
     sizes->baseline += pool->m_codeBytes[CodeKind::Baseline];
     sizes->regexp += pool->m_codeBytes[CodeKind::RegExp];
     sizes->other += pool->m_codeBytes[CodeKind::Other];
     sizes->unused += pool->m_allocation.size - pool->usedCodeBytes();
+  }
+
+  for (DataPoolHashSet::Range r = roPools.all(); !r.empty(); r.popFront()) {
+    ReadOnlyPool* pool = r.front();
+    sizes->ion += pool->m_dataBytes[CodeKind::Ion];
+    sizes->baseline += pool->m_dataBytes[CodeKind::Baseline];
+    sizes->regexp += pool->m_dataBytes[CodeKind::RegExp];
+    sizes->other += pool->m_dataBytes[CodeKind::Other];
+    sizes->unused += pool->m_allocation.size - pool->usedDataBytes();
   }
 }
 
@@ -356,14 +546,26 @@ void ExecutableAllocator::poisonCode(JSRuntime* rt,
   }
 }
 
-ExecutablePool::Allocation ExecutablePoolAllocator::systemAlloc(size_t n) {
+ExecutablePool::Allocation ExecutablePoolAllocator::systemExecAlloc(size_t n) {
   void* allocation = AllocateExecutableMemory(n, ProtectionSetting::Executable,
                                               MemCheckKind::MakeNoAccess);
   ExecutablePool::Allocation alloc = {reinterpret_cast<char*>(allocation), n};
   return alloc;
 }
 
-void ExecutablePoolAllocator::systemRelease(
+void ExecutablePoolAllocator::systemExecRelease(
     const ExecutablePool::Allocation& alloc) {
   DeallocateExecutableMemory(alloc.pages, alloc.size);
+}
+
+ReadOnlyPool::Allocation ExecutablePoolAllocator::systemDataAlloc(size_t n) {
+  void* allocation = AllocateReadOnlyMemory(n, ProtectionSetting::ReadOnly,
+                                            MemCheckKind::MakeNoAccess);
+  ReadOnlyPool::Allocation alloc = {reinterpret_cast<char*>(allocation), n};
+  return alloc;
+}
+
+void ExecutablePoolAllocator::systemDataRelease(
+    const ReadOnlyPool::Allocation& alloc) {
+  DeallocateReadOnlyMemory(alloc.pages, alloc.size);
 }
