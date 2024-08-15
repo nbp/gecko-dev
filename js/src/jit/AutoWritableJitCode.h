@@ -31,21 +31,37 @@ namespace js::jit {
 // fail to make JIT code executable (because the creating code has no chance to
 // recover from a failed destructor).
 class MOZ_RAII AutoWritableJitCodeFallible {
-  JSRuntime* rt_;
-  void* addr_;
-  size_t size_;
+  JitCode* code_;
   AutoMarkJitCodeWritableForThread writableForThread_;
 
+  JSRuntime* runtime() {
+    return code_->runtimeFromMainThread();
+  }
+
+  void* addr() const { return code_->executable_.xStart; }
+  size_t size() const { return code_->executable_.desc.xSize; }
+
+  void* dataAddr() const { return code_->executable_.roStart; }
+  size_t dataSize() const { return code_->executable_.desc.roSize; }
+
  public:
-  explicit AutoWritableJitCodeFallible(JitCode* code)
-      : rt_(code->runtimeFromMainThread()),
-        addr_(code->raw()),
-        size_(code->bufferSize()) {
-    rt_->toggleAutoWritableJitCodeActive(true);
+  explicit AutoWritableJitCodeFallible(JitCode* code) : code_(code) {
+    runtime()->toggleAutoWritableJitCodeActive(true);
   }
 
   [[nodiscard]] bool makeWritable() {
-    return ExecutableAllocator::makeWritable(addr_, size_);
+    if (dataSize() &&
+        !ExecutableAllocator::makeWritable(dataAddr(), dataSize())) {
+      return false;
+    }
+    if (!ExecutableAllocator::makeWritable(addr(), size())) {
+      if (dataSize() &&
+          !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
+        MOZ_CRASH();
+      }
+      return false;
+    }
+    return true;
   }
 
   ~AutoWritableJitCodeFallible() {
@@ -56,16 +72,20 @@ class MOZ_RAII AutoWritableJitCodeFallible {
         measuringTime ? mozilla::TimeStamp::Now() : mozilla::TimeStamp();
     auto timer = mozilla::MakeScopeExit([&] {
       if (measuringTime) {
-        if (Realm* realm = rt_->mainContextFromOwnThread()->realm()) {
+        if (Realm* realm = runtime()->mainContextFromOwnThread()->realm()) {
           realm->timers.protectTime += mozilla::TimeStamp::Now() - startTime;
         }
       }
     });
 
-    if (!ExecutableAllocator::makeExecutableAndFlushICache(addr_, size_)) {
+    if (!ExecutableAllocator::makeExecutableAndFlushICache(addr(), size())) {
       MOZ_CRASH();
     }
-    rt_->toggleAutoWritableJitCodeActive(false);
+    if (dataSize() &&
+        !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
+      MOZ_CRASH();
+    }
+    runtime()->toggleAutoWritableJitCodeActive(false);
   }
 };
 

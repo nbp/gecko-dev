@@ -27,9 +27,13 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
 
   // We require enough bytes for the code, header, and worst-case alignment
   // padding.
-  size_t bytesNeeded = masm.bytesNeeded() + sizeof(JitCodeHeader) +
+  size_t bytesNeeded = masm.execSize() + sizeof(JitCodeHeader) +
                        (CodeAlignment - ExecutableAllocatorAlignment);
   if (bytesNeeded >= MAX_BUFFER_SIZE) {
+    return fail(cx);
+  }
+  size_t dataNeeded = masm.dataSize();
+  if (dataNeeded >= MAX_BUFFER_SIZE) {
     return fail(cx);
   }
 
@@ -43,7 +47,9 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   }
 
   using mozilla::AssertedCast;
-  ExecutableDesc desc{AssertedCast<uint32_t>(bytesNeeded), 0, kind};
+  ExecutableDesc desc{AssertedCast<uint32_t>(bytesNeeded),
+                      AssertedCast<uint32_t>(dataNeeded),
+                      kind};
   Executable result(jitZone->execAlloc().alloc(cx, desc));
   if (!result) {
     return fail(cx);
@@ -62,13 +68,16 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
     return fail(cx);
   }
   if (masm.oom()) {
+    code->finalize(nullptr);
     return fail(cx);
   }
   awjcf.emplace(code);
   if (!awjcf->makeWritable()) {
+    code->finalize(nullptr);
     return fail(cx);
   }
   if (!masm.link(code, kind)) {
+    code->finalize(nullptr);
     return fail(cx);
   }
   if (masm.embedsNurseryPointers()) {

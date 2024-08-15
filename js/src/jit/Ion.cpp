@@ -593,13 +593,12 @@ void JitCodeHeader::init(JitCode* jitCode) {
 
 template <AllowGC allowGC>
 JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t headerSize) {
-  // Copy to handle errors if we fail to allocate.
-  ExecutablePool* pool = exec.pool;
   JitCode* codeObj =
     cx->newCell<JitCode, allowGC>(std::move(exec), headerSize);
   if (!codeObj) {
-    // The executable area has already been allocated.
-    pool->release(exec.desc);
+    // If we fail to allocate, apparently the move operator has not been
+    // executed yet.
+    exec.discard(nullptr);
     return nullptr;
   }
 
@@ -653,10 +652,12 @@ void JitCode::traceChildren(JSTracer* trc) {
 void JitCode::finalize(JS::GCContext* gcx) {
   // If this jitcode had a bytecode map, it must have already been removed.
 #ifdef DEBUG
-  JSRuntime* rt = gcx->runtime();
-  if (hasBytecodeMap_) {
-    MOZ_ASSERT(rt->jitRuntime()->hasJitcodeGlobalTable());
-    MOZ_ASSERT(!rt->jitRuntime()->getJitcodeGlobalTable()->lookup(raw()));
+  if (gcx) {
+    JSRuntime* rt = gcx->runtime();
+    if (hasBytecodeMap_) {
+      MOZ_ASSERT(rt->jitRuntime()->hasJitcodeGlobalTable());
+      MOZ_ASSERT(!rt->jitRuntime()->getJitcodeGlobalTable()->lookup(raw()));
+    }
   }
 #endif
 

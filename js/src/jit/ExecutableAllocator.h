@@ -41,7 +41,6 @@
 
 namespace JS {
 struct CodeSizes;
-struct GCContext;
 }  // namespace JS
 
 namespace js {
@@ -69,7 +68,7 @@ struct ExecutableDesc {
 struct Executable {
   // Move the content out of the source, and reset all pointers from the source
   // to keep only one reference to it.
-  explicit Executable(Executable&& src)
+  Executable(Executable&& src)
     : xStart(std::exchange(src.xStart, nullptr)),
       roStart(std::exchange(src.roStart, nullptr)),
       pool(std::exchange(src.pool, nullptr)),
@@ -97,7 +96,7 @@ struct Executable {
   const ExecutableDesc desc;
 
   // To check for returned values.
-  operator bool() const {
+  explicit operator bool() const {
     MOZ_ASSERT_IF(xStart, pool);
     MOZ_ASSERT_IF(roStart, roPool);
     return bool(xStart);
@@ -131,7 +130,7 @@ struct Executable {
       roPool(roPool),
       desc(desc) {}
 
-  explicit Executable(nullptr_t)
+  explicit Executable(std::nullptr_t)
     : xStart(nullptr),
       roStart(nullptr),
       pool(nullptr),
@@ -149,7 +148,7 @@ struct Executable {
   {
     MOZ_ASSERT(exec.roStart == nullptr);
     MOZ_ASSERT(exec.roPool == nullptr);
-    MOZ_ASSERT(data.start == nullptr);
+    MOZ_ASSERT(data.xStart == nullptr);
     MOZ_ASSERT(data.pool == nullptr);
   };
 };
@@ -160,7 +159,7 @@ class ExecutablePool {
   // Access internal to protect allocated regions.
   friend class ExecutableAllocator;
   // Asserts that pages which are released are contained in the pool.
-  friend class Executable;
+  friend struct Executable;
 
  private:
   struct Allocation {
@@ -238,7 +237,7 @@ class ReadOnlyPool {
   // Access internal to protect allocated regions.
   friend class ExecutableAllocator;
   // Asserts that pages which are released are contained in the pool.
-  friend class Executable;
+  friend struct Executable;
 
  private:
   struct Allocation {
@@ -408,6 +407,11 @@ class ExecutableAllocator {
                                                          size_t size) {
     return ReprotectRegion(start, size, ProtectionSetting::Executable,
                            MustFlushICache::Yes);
+  }
+
+  [[nodiscard]] static bool makeReadOnly(void* start, size_t size) {
+    return ReprotectRegion(start, size, ProtectionSetting::ReadOnly,
+                           MustFlushICache::No);
   }
 
   static void poisonCode(JSRuntime* rt, JitPoisonRangeVector& ranges);

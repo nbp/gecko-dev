@@ -36,8 +36,11 @@ using namespace js::jit;
 #ifdef DEBUG
 void Executable::assertInvariants() {
   MOZ_ASSERT_IF(xStart, pool);
-  MOZ_ASSERT_IF(pool, pool.pages < (uint8_t*) xStart);
-  MOZ_ASSERT_IF(pool, (uint8_t*) xStart + desc.xSize < pool.m_freePtr);
+  MOZ_ASSERT_IF(pool, pool->m_allocation.pages <= (char*) xStart);
+  MOZ_ASSERT_IF(pool, (char*) xStart + desc.xSize <= pool->m_freePtr);
+  MOZ_ASSERT_IF(roStart, roPool);
+  MOZ_ASSERT_IF(roPool, roPool->m_allocation.pages <= (char*) roStart);
+  MOZ_ASSERT_IF(roPool, (char*) roStart + desc.roSize <= roPool->m_freePtr);
 }
 #endif
 
@@ -66,6 +69,13 @@ void Executable::discard(JS::GCContext* gcx) {
 
   xStart = nullptr;
   pool = nullptr;
+
+  if (!roPool) {
+    return;
+  }
+  roPool->release(desc);
+  roStart = nullptr;
+  roPool = nullptr;
 }
 
 ExecutablePool::~ExecutablePool() {
@@ -109,7 +119,7 @@ Executable ExecutablePool::alloc(const ExecutableDesc& desc) {
   void* result = m_freePtr;
   m_freePtr += desc.xSize;
   m_codeBytes[desc.kind] += desc.xSize;
-  MOZ_MAKE_MEM_UNDEFINED(xResult, desc.xSize);
+  MOZ_MAKE_MEM_UNDEFINED(result, desc.xSize);
   return Executable(result, nullptr, this, nullptr, desc);
 }
 
@@ -159,7 +169,7 @@ Executable ReadOnlyPool::alloc(const ExecutableDesc& desc) {
   void* result = m_freePtr;
   m_freePtr += desc.roSize;
   m_dataBytes[desc.kind] += desc.roSize;
-  MOZ_MAKE_MEM_UNDEFINED(xResult, desc.roSize);
+  MOZ_MAKE_MEM_UNDEFINED(result, desc.roSize);
   return Executable(nullptr, result, nullptr, this, desc);
 }
 
@@ -177,8 +187,13 @@ ExecutablePoolAllocator::~ExecutablePoolAllocator() {
     smallDataPools[i]->release(/* willDestroy = */ true);
   }
 
+  // Explicitly clear the previous vectors to avoid danling pointers.
+  smallExecPools.clear();
+  smallDataPools.clear();
+
   // If this asserts we have a pool leak.
-  MOZ_ASSERT(m_pools.empty());
+  MOZ_ASSERT(xPools.empty());
+  MOZ_ASSERT(roPools.empty());
 }
 
 ExecutablePool* ExecutablePoolAllocator::execPoolForSize(
@@ -197,6 +212,7 @@ ExecutablePool* ExecutablePoolAllocator::execPoolForSize(
     }
   }
   if (minPool) {
+    // Pre-increments for the upcoming allocation.
     minPool->addRef();
     return minPool;
   }
@@ -206,7 +222,7 @@ ExecutablePool* ExecutablePoolAllocator::execPoolForSize(
     return createExecPool(least);
   }
 
-  // Create a new allocator
+  // Create a new allocator (with a pre-incremented ref-count)
   ExecutablePool* pool = createExecPool({ExecutableCodePageSize, 0, CodeKind::Other});
   if (!pool) {
     return nullptr;
@@ -216,6 +232,9 @@ ExecutablePool* ExecutablePoolAllocator::execPoolForSize(
   if (smallExecPools.length() < maxSmallPools) {
     // We haven't hit the maximum number of live pools; add the new pool.
     // If append() OOMs, we just return an unshared allocator.
+    //
+    // Pools referenced by the smallExecPools are removed by
+    // ExecutablePoolAllocator::purge.
     if (smallExecPools.append(pool)) {
       pool->addRef();
     }
@@ -258,6 +277,7 @@ ReadOnlyPool* ExecutablePoolAllocator::dataPoolForSize(
     }
   }
   if (minPool) {
+    // Pre-increments for the upcoming allocation.
     minPool->addRef();
     return minPool;
   }
@@ -267,8 +287,8 @@ ReadOnlyPool* ExecutablePoolAllocator::dataPoolForSize(
     return createDataPool(least);
   }
 
-  // Create a new allocator
-  ReadOnlyPool* pool = createDataPool({ReadOnlyDataPageSize, 0, CodeKind::Other});
+  // Create a new allocator (with a pre-incremented ref-count)
+  ReadOnlyPool* pool = createDataPool({0, ReadOnlyDataPageSize, CodeKind::Other});
   if (!pool) {
     return nullptr;
   }
@@ -277,6 +297,9 @@ ReadOnlyPool* ExecutablePoolAllocator::dataPoolForSize(
   if (smallDataPools.length() < maxSmallPools) {
     // We haven't hit the maximum number of live pools; add the new pool.
     // If append() OOMs, we just return an unshared allocator.
+    //
+    // Pools referenced by the smallExecPools are removed by
+    // ExecutablePoolAllocator::purge.
     if (smallDataPools.append(pool)) {
       pool->addRef();
     }
@@ -377,7 +400,7 @@ Executable ExecutableAllocator::alloc(JSContext* cx, const ExecutableDesc& desc)
   MOZ_ASSERT(roundUpAllocationSize(desc.xSize, sizeof(void*)) == desc.xSize);
   MOZ_ASSERT(desc.kind < CodeKind::Count);
 
-  if (desc.xSize == OVERSIZE_ALLOCATION) {
+  if (desc.xSize == uint32_t(OVERSIZE_ALLOCATION)) {
     return Executable(nullptr);
   }
 
@@ -399,6 +422,9 @@ Executable ExecutableAllocator::alloc(JSContext* cx, const ExecutableDesc& desc)
   // Find or allocate an ExecutablePool which can host the requested allocation.
   ReadOnlyPool* dataPool = poolAlloc.dataPoolForSize(desc);
   if (!dataPool) {
+    // Failure to allocate data pages should remove the reference we implicitly
+    // hold on the ExecutablePool.
+    execPool->release();
     return Executable(nullptr);
   }
 

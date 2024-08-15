@@ -451,9 +451,14 @@ class AssemblerX86Shared : public AssemblerShared {
   // Size of the jump relocation table, in bytes.
   size_t jumpRelocationTableBytes() const { return jumpRelocations_.length(); }
   size_t dataRelocationTableBytes() const { return dataRelocations_.length(); }
+
+  // Size of executable code, in bytes.
+  size_t execSize() const {
+    return size();
+  }
   // Size of the data table, in bytes.
-  size_t bytesNeeded() const {
-    return size() + jumpRelocationTableBytes() + dataRelocationTableBytes();
+  size_t dataSize() const {
+    return jumpRelocationTableBytes() + dataRelocationTableBytes();
   }
 
  public:

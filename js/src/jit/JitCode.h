@@ -40,6 +40,8 @@ struct JitCodeHeader {
 
 class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   friend class gc::CellAllocator;
+  // Access Executable class.
+  friend class AutoWritableJitCodeFallible;
 
  public:
   // Entry point used in the generated code, it corresponds to the
@@ -76,6 +78,10 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint32_t jumpRelocTableOffset() const { return dataOffset(); }
   uint32_t dataRelocTableOffset() const {
     return jumpRelocTableOffset() + jumpRelocTableBytes_;
+  }
+
+  uint32_t dataSize() const {
+    return executable_.desc.roSize;
   }
 
  public:

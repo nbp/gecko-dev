@@ -795,15 +795,40 @@ class ProcessJitMemory {
     MOZ_ASSERT(!initialized());
   }
 
-  void assertValidAddress(void* p, size_t bytes) const {
-    MOZ_RELEASE_ASSERT(p >= base_ &&
-                       uintptr_t(p) + bytes <=
-                           uintptr_t(base_) + MaxCodeBytesPerProcess);
+  const uint8_t* codeBase() const { return base_; }
+  const uint8_t* codeEnd() const { return codeBase() + MaxCodeBytesPerProcess; }
+  const uint8_t* dataBase() const { return codeEnd(); }
+  const uint8_t* dataEnd() const { return dataBase() + MaxDataBytesPerProcess; }
+
+  bool containsCodeAddressRange(const void* p, size_t bytes) const {
+    return p >= codeBase() && uintptr_t(p) + bytes < uintptr_t(codeEnd());
+  }
+
+  bool containsDataAddressRange(const void* p, size_t bytes) const {
+    return p >= dataBase() && uintptr_t(p) + bytes < uintptr_t(dataEnd());
+  }
+
+  void assertCodeValidAddress(void* p, size_t bytes) const {
+    MOZ_RELEASE_ASSERT(containsCodeAddressRange(p, bytes));
+  }
+  void assertDataValidAddress(void* p, size_t bytes) const {
+    MOZ_RELEASE_ASSERT(containsDataAddressRange(p, bytes));
+  }
+  void assertValidProtection(void* p, size_t bytes,
+                             ProtectionSetting protection) const {
+    if (containsCodeAddressRange(p, bytes)) {
+      MOZ_RELEASE_ASSERT(protection == ProtectionSetting::Executable ||
+                         protection == ProtectionSetting::Writable);
+      return;
+    }
+    MOZ_RELEASE_ASSERT(containsDataAddressRange(p, bytes));
+    MOZ_RELEASE_ASSERT(protection == ProtectionSetting::ReadOnly ||
+                       protection == ProtectionSetting::Writable);
   }
 
   bool containsAddress(const void* p) const {
-    return p >= base_ &&
-           uintptr_t(p) < uintptr_t(base_) + MaxCodeBytesPerProcess;
+    return containsCodeAddressRange(p, 0) ||
+        containsDataAddressRange(p, 0);
   }
 
   // Allocate enough pages to fit some executable bytes.
@@ -903,7 +928,7 @@ void ProcessJitMemory::xDeallocate(void* addr, size_t bytes, bool decommit) {
   MOZ_ASSERT(bytes > 0);
   MOZ_ASSERT((bytes % ExecutableCodePageSize) == 0);
 
-  assertValidAddress(addr, bytes);
+  assertCodeValidAddress(addr, bytes);
 
   size_t firstPage =
       (static_cast<uint8_t*>(addr) - base_) / ExecutableCodePageSize;
@@ -935,7 +960,7 @@ void* ProcessJitMemory::roAllocate(size_t bytes, ProtectionSetting protection,
   MOZ_ASSERT(initialized());
   MOZ_ASSERT(HasJitBackend());
   MOZ_ASSERT(bytes > 0);
-  MOZ_ASSERT((bytes % ExecutableDataPageSize) == 0);
+  MOZ_ASSERT((bytes % ReadOnlyDataPageSize) == 0);
 
   size_t numPages = bytes / ReadOnlyDataPageSize;
 
@@ -1013,7 +1038,7 @@ void ProcessJitMemory::roDeallocate(void* addr, size_t bytes, bool decommit) {
   MOZ_ASSERT(bytes > 0);
   MOZ_ASSERT((bytes % ExecutableCodePageSize) == 0);
 
-  assertValidAddress(addr, bytes);
+  assertDataValidAddress(addr, bytes);
 
   uintptr_t roOffset =
       static_cast<uint8_t*>(addr) - base_ - MaxCodeBytesPerProcess;
@@ -1031,7 +1056,7 @@ void ProcessJitMemory::roDeallocate(void* addr, size_t bytes, bool decommit) {
   roPagesAllocated_ -= numPages;
 
   for (size_t i = 0; i < numPages; i++) {
-    xPages_.remove(firstPage + i);
+    roPages_.remove(firstPage + i);
   }
 
   // Move the cursor back so we can reuse pages instead of fragmenting the
@@ -1113,7 +1138,7 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
 
   MOZ_ASSERT((uintptr_t(pageStart) % pageSize) == 0);
 
-  jitMemory.assertValidAddress(pageStart, size);
+  jitMemory.assertValidProtection(pageStart, size, protection);
 
   // On weak memory systems, make sure new code is visible on all cores before
   // addresses of the code are made public.  Now is the latest moment in time
@@ -1139,22 +1164,33 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
   MOZ_CRASH("writeProtectCode should always be false on Apple Silicon");
 #  endif
 
+  // The flags variable is defined as volatile in order to tell the compiler to
+  // not optimize away the multiple calls to ProtectionSettingToFlags. If an
+  // attacker wants to use this mprotect / VirtualAlloc call, the content of the
+  // flags register might be forged and it would have to match the protection
+  // settings.
+  //
+  // Of course this fails if the content of the flags register is cloned...
+  // which is unfortunately likely.
+  //
+  // TODO: Verify the assembly ...
 #  ifdef XP_WIN
-  DWORD flags = ProtectionSettingToFlags(protection);
+  volatile DWORD flags = ProtectionSettingToFlags(protection);
   // This is a essentially a VirtualProtect, but with lighter impact on
   // antivirus analysis. See bug 1823634.
   if (!VirtualAlloc(pageStart, size, MEM_COMMIT, flags)) {
     return false;
   }
 #  else
-  unsigned flags = ProtectionSettingToFlags(protection);
+  volatile unsigned flags = ProtectionSettingToFlags(protection);
   if (mprotect(pageStart, size, flags)) {
     return false;
   }
 #  endif
 #endif  // __wasi__
 
-  jitMemory.assertValidAddress(pageStart, size);
+  MOZ_RELEASE_ASSERT(flags == ProtectionSettingToFlags(protection));
+  jitMemory.assertValidProtection(pageStart, size, protection);
   return true;
 }
 

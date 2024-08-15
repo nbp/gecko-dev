@@ -88,6 +88,14 @@ class MacroAssemblerX86Shared : public Assembler {
   SimdData* getSimdData(const SimdConstant& v);
 
  public:
+  // Total size
+  //
+  // TODO: We should remove this function, but it is still needed for Wasm which
+  // aggregates all in the code section.
+  size_t bytesNeeded() const {
+    return execSize() + dataSize();
+  }
+
   using Assembler::call;
 
   MacroAssemblerX86Shared() = default;
