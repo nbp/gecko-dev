@@ -227,6 +227,8 @@ class RelocationIterator {
 };
 
 JitCode* Assembler::CodeFromJump(JitCode* code, uint8_t* jump) {
+  MOZ_ASSERT(code->containsNativePC(jump),
+             "Jump instruction should be in the generated code");
   uint8_t* target = (uint8_t*)X86Encoding::GetRel32Target(jump);
 
   MOZ_ASSERT(!code->containsNativePC(target),
@@ -239,7 +241,10 @@ void Assembler::TraceJumpRelocations(JSTracer* trc, JitCode* code,
                                      CompactBufferReader& reader) {
   RelocationIterator iter(reader);
   while (iter.read()) {
-    JitCode* child = CodeFromJump(code, code->raw() + iter.offset());
+    // JmpSrc's CodeOffset returned while producing code.
+    uint8_t* jump = code->raw() + iter.offset();
+    // Extract value encoded in generated code.
+    JitCode* child = CodeFromJump(code, jump);
     TraceManuallyBarrieredEdge(trc, &child, "rel32");
     MOZ_ASSERT(child == CodeFromJump(code, code->raw() + iter.offset()));
   }

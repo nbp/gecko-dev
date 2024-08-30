@@ -87,13 +87,35 @@ class MacroAssemblerX86Shared : public Assembler {
   Double* getDouble(double d);
   SimdData* getSimdData(const SimdConstant& v);
 
+  void bindDataOffsets(const UsesVector&, intptr_t relCodeBaseOffset);
+
  public:
+  // Copy the content allocated for data pages from the MacroAssembler memory to
+  // the data page. The amount of data written by this function should match the data size.
+  void copyConstantsTable(const uint8_t* codeBase, uint8_t* dataBase);
+
+  size_t constantsTableBytes() const {
+    size_t bytes = 0;
+    bytes += !simds_.empty() ? 16 : 0;
+    bytes += simds_.length() * 16;
+    bytes += (!doubles_.empty() && bytes == 0) ? sizeof(double) : 0;
+    bytes += doubles_.length() * sizeof(double);
+    bytes += (!floats_.empty() && bytes == 0) ? sizeof(float) : 0;
+    bytes += floats_.length() * sizeof(float);
+    return bytes;
+  }
+
   // Total size
   //
   // TODO: We should remove this function, but it is still needed for Wasm which
   // aggregates all in the code section.
   size_t bytesNeeded() const {
     return execSize() + dataSize();
+  }
+
+  // Size of the data table, in bytes.
+  size_t dataSize() const {
+    return AssemblerX86Shared::dataSize() + constantsTableBytes();
   }
 
   using Assembler::call;

@@ -53,6 +53,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint32_t insnSize_;    // Instruction stream size.
   uint32_t jumpRelocTableBytes_;  // Size of the jump relocation table.
   uint32_t dataRelocTableBytes_;  // Size of the data relocation table.
+  uint32_t constantsTableBytes_;  // Size of the data relocation table.
   uint8_t headerSize_ : 5;        // Number of bytes allocated before codeStart.
   bool invalidated_ : 1;     // Whether the code object has been invalidated.
                              // This is necessary to prevent GC tracing.
@@ -62,11 +63,12 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
   JitCode() = delete;
   JitCode(Executable&& exec, uint32_t headerSize)
-      : TenuredCellWithNonGCPointer(((uint8_t*) exec.xStart) + headerSize),
+      : TenuredCellWithNonGCPointer((uint8_t*) exec.xStart + headerSize),
         executable_(std::move(exec)),
         insnSize_(0),
         jumpRelocTableBytes_(0),
         dataRelocTableBytes_(0),
+        constantsTableBytes_(0),
         headerSize_(headerSize),
         invalidated_(false),
         hasBytecodeMap_(false),
@@ -74,21 +76,44 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
     MOZ_ASSERT(headerSize_ == headerSize);
   }
 
-  uint32_t dataOffset() const { return insnSize_; }
+  uint32_t dataOffset() const {
+    if (executable_.desc.roSize) {
+      return 0;
+    }
+    return insnSize_;
+  }
   uint32_t jumpRelocTableOffset() const { return dataOffset(); }
   uint32_t dataRelocTableOffset() const {
     return jumpRelocTableOffset() + jumpRelocTableBytes_;
   }
-
-  uint32_t dataSize() const {
-    return executable_.desc.roSize;
+  uint32_t constantsTableOffset() const {
+    return dataRelocTableOffset() + dataRelocTableBytes_;
   }
+  uint32_t dataSize() const {
+    return constantsTableOffset() + constantsTableBytes_;
+  }
+
+ public:
+  uint8_t* dataRaw() const {
+    if (executable_.desc.roSize) {
+      return (uint8_t*) executable_.roStart;
+    }
+    return (uint8_t*) executable_.xStart + insnSize_;
+  }
+  uint8_t* jumpRelocTable() const { return &dataRaw()[jumpRelocTableOffset()]; }
+  uint8_t* dataRelocTable() const { return &dataRaw()[dataRelocTableOffset()]; }
+  uint8_t* constantsTable() const { return &dataRaw()[constantsTableOffset()]; }
+  uint8_t* dataRawEnd() const { return dataRaw() + dataSize(); }
 
  public:
   uint8_t* rawEnd() const { return raw() + insnSize_; }
   bool containsNativePC(const void* addr) const {
     const uint8_t* addr_u8 = (const uint8_t*)addr;
     return raw() <= addr_u8 && addr_u8 < rawEnd();
+  }
+  bool containsDataPtr(const void* addr) const {
+    const uint8_t* addr_u8 = (const uint8_t*)addr;
+    return dataRaw() <= addr_u8 && addr_u8 < dataRawEnd();
   }
   size_t instructionsSize() const { return insnSize_; }
   size_t bufferSize() const { return executable_.desc.xSize - headerSize_; }
@@ -125,8 +150,6 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   }
 
   static size_t offsetOfCode() { return offsetOfHeaderPtr(); }
-
-  uint8_t* jumpRelocTable() { return raw() + jumpRelocTableOffset(); }
 
   // Allocates a new JitCode object which will be managed by the GC. If no
   // object can be allocated, nullptr is returned. On failure, |pool| is

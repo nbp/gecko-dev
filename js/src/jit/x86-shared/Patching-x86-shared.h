@@ -35,12 +35,8 @@ inline void SetInt32(void* where, int32_t value, uint32_t trailing = 0) {
 inline void SetRel32(void* from, void* to, uint32_t trailing = 0) {
   intptr_t offset =
       reinterpret_cast<intptr_t>(to) - reinterpret_cast<intptr_t>(from);
-  MOZ_ASSERT(offset == static_cast<int32_t>(offset),
-             "offset is too great for a 32-bit relocation");
-  if (offset != static_cast<int32_t>(offset)) {
-    MOZ_CRASH("offset is too great for a 32-bit relocation");
-  }
-
+  MOZ_RELEASE_ASSERT(offset == static_cast<int32_t>(offset),
+                     "offset is too great for a 32-bit relocation");
   SetInt32(from, offset, trailing);
 }
 

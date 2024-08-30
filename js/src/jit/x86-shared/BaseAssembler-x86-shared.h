@@ -4627,6 +4627,24 @@ class BaseAssembler : public GenericAssembler {
     SetInt32(code + from.offset(), to.offset());
   }
 
+  void linkData(JmpSrc from, JmpDst to) {
+    MOZ_ASSERT(from.offset() != -1);
+    MOZ_ASSERT(to.offset() != -1);
+
+    // Sanity check - if the assembler has OOM'd, it will start overwriting
+    // its internal buffer and thus our links could be garbage.
+    if (oom()) {
+      return;
+    }
+
+    assertValidJmpSrc(from);
+    MOZ_RELEASE_ASSERT(size_t(to.offset()) > size());
+
+    spew(".set .Lfrom%d, .Llabel%d", from.offset(), to.offset());
+    unsigned char* code = m_formatter.data();
+    SetRel32(code + from.offset(), code + to.offset(), from.trailing());
+  }
+
   void linkJump(JmpSrc from, JmpDst to) {
     MOZ_ASSERT(from.offset() != -1);
     MOZ_ASSERT(to.offset() != -1);

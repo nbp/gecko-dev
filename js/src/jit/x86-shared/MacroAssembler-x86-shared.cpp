@@ -155,6 +155,57 @@ MacroAssemblerX86Shared::SimdData* MacroAssemblerX86Shared::getSimdData(
   return getConstant<SimdData, SimdMap>(v, simdMap_, simds_);
 }
 
+void MacroAssemblerX86Shared::bindDataOffsets(const UsesVector& uses,
+                                              intptr_t relCodeBaseOffset) {
+  for (JmpSrc src : uses) {
+    JmpDst dst(relCodeBaseOffset);
+    MOZ_ASSERT(dst.offset() == relCodeBaseOffset);
+    masm.linkData(src, dst);
+  }
+}
+
+void MacroAssemblerX86Shared::copyConstantsTable(const uint8_t* codeBase,
+                                                 uint8_t* dataBase) {
+  MOZ_ASSERT(!IsCompilingWasm(), "Don't forget MacroAssemblerX64::finish()");
+  size_t offset = 0;
+  // Align the memory to fit SIMD requirements.
+  if (!simds_.empty()) {
+    offset = (16 - ((uintptr_t) dataBase % 16)) % 16;
+  }
+
+  // SIMD memory values must be suitably aligned.
+  for (const SimdData& v : simds_) {
+    MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 16 == 0);
+    bindDataOffsets(v.uses, dataBase + offset - codeBase);
+    memcpy(dataBase + offset, v.value.bytes(), 16);
+    offset += 16;
+  }
+
+  if (!doubles_.empty() && offset == 0) {
+    offset = (8 - ((uintptr_t) dataBase % 8)) % 8;
+  }
+
+  for (const Double& d : doubles_) {
+    MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 8 == 0);
+    bindDataOffsets(d.uses, dataBase + offset - codeBase);
+    memcpy(dataBase + offset, &d.value, 8);
+    offset += 8;
+  }
+
+  if (!floats_.empty() && offset == 0) {
+    offset = (4 - ((uintptr_t) dataBase % 4)) % 4;
+  }
+
+  for (const Float& f : floats_) {
+    MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 4 == 0);
+    bindDataOffsets(f.uses, dataBase + offset - codeBase);
+    memcpy(dataBase + offset, &f.value, 4);
+    offset += 4;
+  }
+
+  MOZ_ASSERT(offset <= constantsTableBytes());
+}
+
 void MacroAssemblerX86Shared::binarySimd128(
     const SimdConstant& rhs, FloatRegister lhsDest,
     void (MacroAssembler::*regOp)(const Operand&, FloatRegister, FloatRegister),
