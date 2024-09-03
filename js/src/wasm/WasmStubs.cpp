@@ -1959,7 +1959,7 @@ bool wasm::GenerateImportFunctions(const ModuleEnvironment& env,
     }
   }
 
-  masm.finish();
+  masm.finish(/* dataIsExec */ true);
   if (masm.oom()) {
     return false;
   }
@@ -3032,7 +3032,7 @@ bool wasm::GenerateStubs(const ModuleEnvironment& env,
     return false;
   }
 
-  masm.finish();
+  masm.finish(/* dataIsExec */ true);
   if (masm.oom()) {
     return false;
   }

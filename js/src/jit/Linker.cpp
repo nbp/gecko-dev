@@ -27,9 +27,9 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
 
   // We require enough bytes for the code, header, and worst-case alignment
   // padding.
-  size_t bytesNeeded = masm.execSize() + sizeof(JitCodeHeader) +
-                       (CodeAlignment - ExecutableAllocatorAlignment);
-  if (bytesNeeded >= MAX_BUFFER_SIZE) {
+  size_t execNeeded = masm.execSize() + sizeof(JitCodeHeader) +
+                      (CodeAlignment - ExecutableAllocatorAlignment);
+  if (execNeeded >= MAX_BUFFER_SIZE) {
     return fail(cx);
   }
   size_t dataNeeded = masm.dataSize();
@@ -37,8 +37,8 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
     return fail(cx);
   }
 
-  // ExecutableAllocator requires bytesNeeded to be aligned.
-  bytesNeeded = AlignBytes(bytesNeeded, ExecutableAllocatorAlignment);
+  // ExecutableAllocator requires execNeeded to be aligned.
+  execNeeded = AlignBytes(execNeeded, ExecutableAllocatorAlignment);
 
   JitZone* jitZone = cx->zone()->getJitZone(cx);
   if (!jitZone) {
@@ -47,7 +47,7 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   }
 
   using mozilla::AssertedCast;
-  ExecutableDesc desc{AssertedCast<uint32_t>(bytesNeeded),
+  ExecutableDesc desc{AssertedCast<uint32_t>(execNeeded),
                       AssertedCast<uint32_t>(dataNeeded),
                       kind};
   Executable result(jitZone->execAlloc().alloc(cx, desc));
@@ -61,7 +61,7 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
 
   // Bump the code up to a nice alignment.
   codeStart = (uint8_t*)AlignBytes((uintptr_t)codeStart, CodeAlignment);
-  MOZ_ASSERT(codeStart + masm.bytesNeeded() <= execStart + bytesNeeded);
+  MOZ_ASSERT(codeStart + masm.execSize() <= execStart + execNeeded);
   uint32_t headerSize = codeStart - execStart;
   JitCode* code = JitCode::New<NoGC>(cx, std::move(result), headerSize);
   if (!code) {

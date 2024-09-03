@@ -3983,13 +3983,13 @@ void MacroAssembler::convertValueToInt(
   bind(&done);
 }
 
-void MacroAssembler::finish() {
+void MacroAssembler::finish(bool dataIsExec) {
   if (failureLabel_.used()) {
     bind(&failureLabel_);
     handleFailure();
   }
 
-  MacroAssemblerSpecific::finish();
+  MacroAssemblerSpecific::finish(dataIsExec);
 
   MOZ_RELEASE_ASSERT(
       size() <= MaxCodeBytesPerProcess,

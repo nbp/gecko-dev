@@ -11939,7 +11939,7 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& moduleEnv,
     code->featureUsage |= f.iter_.featureUsage();
   }
 
-  masm.finish();
+  masm.finish(/* dataIsExec */ true);
   if (masm.oom()) {
     return false;
   }

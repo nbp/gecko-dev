@@ -458,8 +458,8 @@ void MacroAssemblerX64::bindOffsets(
   }
 }
 
-void MacroAssemblerX64::finish() {
-  if (GetJitContext()->isCompilingWasm()) {
+void MacroAssemblerX64::finish(bool dataIsExec) {
+  if (dataIsExec) {
     if (!doubles_.empty()) {
       masm.haltingAlign(sizeof(double));
     }

@@ -529,7 +529,7 @@ bool LazyStubTier::createManyEntryStubs(const Uint32Vector& funcExportIndices,
   MOZ_ASSERT(codeRanges.length() == numExpectedRanges,
              "incorrect number of entries per function");
 
-  masm.finish();
+  masm.finish(/* dataIsExec */ true);
 
   MOZ_ASSERT(masm.callSites().empty());
   MOZ_ASSERT(masm.callSiteTargets().empty());
