@@ -1337,21 +1337,25 @@ class Assembler : public AssemblerShared {
   }
 
  public:
-  void finish();
+  void finish(bool dataIsExec);
   bool appendRawCode(const uint8_t* code, size_t numBytes);
   bool reserve(size_t size);
   bool swapBuffer(wasm::Bytes& bytes);
   void copyJumpRelocationTable(uint8_t* dest);
   void copyDataRelocationTable(uint8_t* dest);
+  void copyConstantsTable(const uint8_t* codeBase, uint8_t* dataBase);
 
   // Size of the instruction stream, in bytes, after pools are flushed.
   size_t size() const;
   // Size of the jump relocation table, in bytes.
   size_t jumpRelocationTableBytes() const;
   size_t dataRelocationTableBytes() const;
+  size_t constantsTableBytes() const;
 
   // Size of the data table, in bytes.
   size_t bytesNeeded() const;
+  size_t execSize() const;
+  size_t dataSize() const;
 
   // Write a single instruction into the instruction stream.  Very hot,
   // inlined for performance

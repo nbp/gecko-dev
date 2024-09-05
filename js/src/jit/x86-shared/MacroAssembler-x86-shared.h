@@ -87,12 +87,14 @@ class MacroAssemblerX86Shared : public Assembler {
   Double* getDouble(double d);
   SimdData* getSimdData(const SimdConstant& v);
 
-  void bindDataOffsets(const UsesVector&, intptr_t relCodeBaseOffset);
+  void bindDataOffsets(const UsesVector& uses, uint8_t* codeBase,
+                       uint8_t* dataAddr);
 
  public:
   // Copy the content allocated for data pages from the MacroAssembler memory to
-  // the data page. The amount of data written by this function should match the data size.
-  void copyConstantsTable(const uint8_t* codeBase, uint8_t* dataBase);
+  // the data page, then update the code references. The amount of data written
+  // by this function should match the data size.
+  void copyConstantsTable(uint8_t* codeBase, uint8_t* dataBase);
 
   size_t constantsTableBytes() const {
     size_t bytes = 0;

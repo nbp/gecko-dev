@@ -85,7 +85,7 @@ ABIArg ABIArgGenerator::next(MIRType type) {
 namespace js {
 namespace jit {
 
-void Assembler::finish() {
+void Assembler::finish(bool dataIsExec) {
   armbuffer_.flushPool();
 
   // The extended jump table is part of the code buffer.

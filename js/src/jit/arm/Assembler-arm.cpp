@@ -494,7 +494,7 @@ Imm16::Imm16(uint32_t imm)
 
 Imm16::Imm16() : invalid_(0xfff) {}
 
-void Assembler::finish() {
+void Assembler::finish(bool dataIsExec) {
   flush();
   MOZ_ASSERT(!isFinished);
   isFinished = true;
@@ -732,6 +732,8 @@ void Assembler::copyDataRelocationTable(uint8_t* dest) {
   if (dataRelocations_.length()) {
     memcpy(dest, dataRelocations_.buffer(), dataRelocations_.length());
   }
+}
+void Assembler::copyConstantsTable(const uint8_t* codeBase, uint8_t* dataBase) {
 }
 
 void Assembler::processCodeLabels(uint8_t* rawCode) {
@@ -1134,10 +1136,20 @@ size_t Assembler::jumpRelocationTableBytes() const {
 size_t Assembler::dataRelocationTableBytes() const {
   return dataRelocations_.length();
 }
+size_t Assembler::constantsTableBytes() const {
+  return 0;
+}
 
 // Size of the data table, in bytes.
 size_t Assembler::bytesNeeded() const {
   return size() + jumpRelocationTableBytes() + dataRelocationTableBytes();
+}
+size_t Assembler::execSize() const {
+  return size();
+}
+size_t Assembler::dataSize() const {
+  return jumpRelocationTableBytes() + dataRelocationTableBytes() +
+      constantsTableBytes();
 }
 
 // Allocate memory for a branch instruction, it will be overwritten

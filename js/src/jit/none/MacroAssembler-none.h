@@ -42,8 +42,11 @@ class MacroAssemblerNone : public Assembler {
 
   size_t size() const { MOZ_CRASH(); }
   size_t bytesNeeded() const { MOZ_CRASH(); }
+  size_t execNeeded() const { MOZ_CRASH(); }
+  size_t dataNeeded() const { MOZ_CRASH(); }
   size_t jumpRelocationTableBytes() const { MOZ_CRASH(); }
   size_t dataRelocationTableBytes() const { MOZ_CRASH(); }
+  size_t constantsTableBytes() const { MOZ_CRASH(); }
   size_t preBarrierTableBytes() const { MOZ_CRASH(); }
 
   size_t numCodeLabels() const { MOZ_CRASH(); }
@@ -69,6 +72,7 @@ class MacroAssemblerNone : public Assembler {
   void executableCopy(void*, bool = true) { MOZ_CRASH(); }
   void copyJumpRelocationTable(uint8_t*) { MOZ_CRASH(); }
   void copyDataRelocationTable(uint8_t*) { MOZ_CRASH(); }
+  void copyConstantsTable(uint8_t*) { MOZ_CRASH(); }
   void copyPreBarrierTable(uint8_t*) { MOZ_CRASH(); }
   void processCodeLabels(uint8_t*) { MOZ_CRASH(); }
 
@@ -101,7 +105,7 @@ class MacroAssemblerNone : public Assembler {
   CodeOffset toggledCall(JitCode*, bool) { MOZ_CRASH(); }
   static size_t ToggledCallSize(uint8_t*) { MOZ_CRASH(); }
 
-  void finish() { MOZ_CRASH(); }
+  void finish(bool dataIsExec) { MOZ_CRASH(); }
 
   template <typename T, typename S>
   void moveValue(T, S) {

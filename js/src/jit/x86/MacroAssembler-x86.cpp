@@ -459,52 +459,54 @@ void MacroAssemblerX86::vpmuludqSimd128(const SimdConstant& v,
   vpPatchOpSimd128(v, lhs, dest, &X86Encoding::BaseAssemblerX86::vpmuludq_mr);
 }
 
-void MacroAssemblerX86::finish() {
+void MacroAssemblerX86::finish(bool dataIsExec) {
   // Last instruction may be an indirect jump so eagerly insert an undefined
   // instruction byte to prevent processors from decoding data values into
   // their pipelines. See Intel performance guides.
   masm.ud2();
 
-  if (!doubles_.empty()) {
-    masm.haltingAlign(sizeof(double));
-  }
-  for (const Double& d : doubles_) {
-    CodeOffset cst(masm.currentOffset());
-    for (CodeOffset use : d.uses) {
-      addCodeLabel(CodeLabel(use, cst));
+  if (dataIsExec) {
+    if (!doubles_.empty()) {
+      masm.haltingAlign(sizeof(double));
     }
-    masm.doubleConstant(d.value);
-    if (!enoughMemory_) {
-      return;
+    for (const Double& d : doubles_) {
+      CodeOffset cst(masm.currentOffset());
+      for (CodeOffset use : d.uses) {
+        addCodeLabel(CodeLabel(use, cst));
+      }
+      masm.doubleConstant(d.value);
+      if (!enoughMemory_) {
+        return;
+      }
     }
-  }
 
-  if (!floats_.empty()) {
-    masm.haltingAlign(sizeof(float));
-  }
-  for (const Float& f : floats_) {
-    CodeOffset cst(masm.currentOffset());
-    for (CodeOffset use : f.uses) {
-      addCodeLabel(CodeLabel(use, cst));
+    if (!floats_.empty()) {
+      masm.haltingAlign(sizeof(float));
     }
-    masm.floatConstant(f.value);
-    if (!enoughMemory_) {
-      return;
+    for (const Float& f : floats_) {
+      CodeOffset cst(masm.currentOffset());
+      for (CodeOffset use : f.uses) {
+        addCodeLabel(CodeLabel(use, cst));
+      }
+      masm.floatConstant(f.value);
+      if (!enoughMemory_) {
+        return;
+      }
     }
-  }
 
-  // SIMD memory values must be suitably aligned.
-  if (!simds_.empty()) {
-    masm.haltingAlign(SimdMemoryAlignment);
-  }
-  for (const SimdData& v : simds_) {
-    CodeOffset cst(masm.currentOffset());
-    for (CodeOffset use : v.uses) {
-      addCodeLabel(CodeLabel(use, cst));
+    // SIMD memory values must be suitably aligned.
+    if (!simds_.empty()) {
+      masm.haltingAlign(SimdMemoryAlignment);
     }
-    masm.simd128Constant(v.value.bytes());
-    if (!enoughMemory_) {
-      return;
+    for (const SimdData& v : simds_) {
+      CodeOffset cst(masm.currentOffset());
+      for (CodeOffset use : v.uses) {
+        addCodeLabel(CodeLabel(use, cst));
+      }
+      masm.simd128Constant(v.value.bytes());
+      if (!enoughMemory_) {
+        return;
+      }
     }
   }
 }

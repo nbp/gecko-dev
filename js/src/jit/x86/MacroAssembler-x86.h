@@ -120,7 +120,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared {
 
   // The buffer is about to be linked, make sure any constant pools or excess
   // bookkeeping has been flushed to the instruction stream.
-  void finish();
+  void finish(bool dataIsExec);
 
   /////////////////////////////////////////////////////////////////
   // X86-specific interface.

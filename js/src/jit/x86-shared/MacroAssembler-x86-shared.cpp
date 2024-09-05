@@ -156,15 +156,27 @@ MacroAssemblerX86Shared::SimdData* MacroAssemblerX86Shared::getSimdData(
 }
 
 void MacroAssemblerX86Shared::bindDataOffsets(const UsesVector& uses,
-                                              intptr_t relCodeBaseOffset) {
-  for (JmpSrc src : uses) {
+                                              uint8_t* codeBase,
+                                              uint8_t* dataAddr) {
+  intptr_t relCodeBaseOffset = dataAddr - codeBase;
+
+  for (auto& src : uses) {
+#ifdef JS_CODEGEN_X64
+    // x64 uses rip-relative addressing of constants.
     JmpDst dst(relCodeBaseOffset);
     MOZ_ASSERT(dst.offset() == relCodeBaseOffset);
     masm.linkData(src, dst);
+#else
+    // x86 uses absolute addressing.
+    CodeOffset cst(relCodeBaseOffset);
+    CodeLabel bindSrcTo(src, cst);
+    addCodeLabel(bindSrcTo);
+    //Assembler::Bind(codeBase, bindSrcTo);
+#endif
   }
 }
 
-void MacroAssemblerX86Shared::copyConstantsTable(const uint8_t* codeBase,
+void MacroAssemblerX86Shared::copyConstantsTable(uint8_t* codeBase,
                                                  uint8_t* dataBase) {
   MOZ_ASSERT(!IsCompilingWasm(), "Don't forget MacroAssemblerX64::finish()");
   size_t offset = 0;
@@ -176,7 +188,7 @@ void MacroAssemblerX86Shared::copyConstantsTable(const uint8_t* codeBase,
   // SIMD memory values must be suitably aligned.
   for (const SimdData& v : simds_) {
     MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 16 == 0);
-    bindDataOffsets(v.uses, dataBase + offset - codeBase);
+    bindDataOffsets(v.uses, codeBase, dataBase + offset);
     memcpy(dataBase + offset, v.value.bytes(), 16);
     offset += 16;
   }
@@ -187,7 +199,7 @@ void MacroAssemblerX86Shared::copyConstantsTable(const uint8_t* codeBase,
 
   for (const Double& d : doubles_) {
     MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 8 == 0);
-    bindDataOffsets(d.uses, dataBase + offset - codeBase);
+    bindDataOffsets(d.uses, codeBase, dataBase + offset);
     memcpy(dataBase + offset, &d.value, 8);
     offset += 8;
   }
@@ -198,7 +210,7 @@ void MacroAssemblerX86Shared::copyConstantsTable(const uint8_t* codeBase,
 
   for (const Float& f : floats_) {
     MOZ_ASSERT((((uintptr_t) dataBase) + offset) % 4 == 0);
-    bindDataOffsets(f.uses, dataBase + offset - codeBase);
+    bindDataOffsets(f.uses, codeBase, dataBase + offset);
     memcpy(dataBase + offset, &f.value, 4);
     offset += 4;
   }
