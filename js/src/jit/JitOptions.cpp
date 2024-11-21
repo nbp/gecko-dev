@@ -159,6 +159,10 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether the IonMonkey JIT is enabled.
   SET_DEFAULT(ion, true);
 
+  // Whether the JIT split the its destination area in a code and data section
+  // (=true) or put everything in the code section (=false).
+  SET_DEFAULT(use_jit_data_section, true);
+
   // Whether the IonMonkey and Baseline JITs are enabled for Trusted Principals.
   // (Ignored if ion or baselineJit is set to true.)
   SET_DEFAULT(jitForTrustedPrincipals, false);

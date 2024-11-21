@@ -25,19 +25,23 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   static_assert(CodeAlignment >= ExecutableAllocatorAlignment,
                 "Unexpected alignment requirements");
 
-  // We require enough bytes for the code, header, and worst-case alignment
-  // padding.
-  size_t execNeeded = masm.execSize() + sizeof(JitCodeHeader) +
-                      (CodeAlignment - ExecutableAllocatorAlignment);
-  if (execNeeded >= MAX_BUFFER_SIZE) {
-    return fail(cx);
-  }
-  size_t dataNeeded = masm.dataSize();
-  if (dataNeeded >= MAX_BUFFER_SIZE) {
-    return fail(cx);
+  // Query the MacroAssembler to know if data should be allocated separately,
+  // and size the sections accordingly.
+  size_t execNeeded, dataNeeded;
+  if (masm.useDataSection()) {
+    execNeeded = masm.execSize();
+    dataNeeded = masm.dataSize();
+  } else {
+    execNeeded = masm.bytesNeeded();
+    dataNeeded = 0;
   }
 
   // ExecutableAllocator requires execNeeded to be aligned.
+  execNeeded += sizeof(JitCodeHeader);
+  execNeeded += (CodeAlignment - ExecutableAllocatorAlignment);
+  if (execNeeded >= MAX_BUFFER_SIZE || dataNeeded >= MAX_BUFFER_SIZE) {
+    return fail(cx);
+  }
   execNeeded = AlignBytes(execNeeded, ExecutableAllocatorAlignment);
 
   JitZone* jitZone = cx->zone()->getJitZone(cx);

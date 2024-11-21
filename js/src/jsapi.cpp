@@ -4316,6 +4316,15 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
         JitSpew(js::jit::JitSpew_IonScripts, "Disable ion");
       }
       break;
+    case JSJITCOMPILER_USE_JIT_DATA_SECTION:
+      if (value == 1) {
+        jit::JitOptions.use_jit_data_section = true;
+        JitSpew(js::jit::JitSpew_IonScripts, "Enable JIT data section");
+      } else if (value == 0) {
+        jit::JitOptions.use_jit_data_section = false;
+        JitSpew(js::jit::JitSpew_IonScripts, "Disable JIT data section");
+      }
+      break;
     case JSJITCOMPILER_JIT_TRUSTEDPRINCIPALS_ENABLE:
       if (value == 1) {
         jit::JitOptions.jitForTrustedPrincipals = true;
@@ -4466,6 +4475,9 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_ION_ENABLE:
       *valueOut = jit::JitOptions.ion;
+      break;
+    case JSJITCOMPILER_USE_JIT_DATA_SECTION:
+      *valueOut = jit::JitOptions.use_jit_data_section;
       break;
     case JSJITCOMPILER_ION_FREQUENT_BAILOUT_THRESHOLD:
       *valueOut = jit::JitOptions.frequentBailoutThreshold;

@@ -9476,7 +9476,7 @@ bool wasm::IonCompileFunctions(const ModuleEnvironment& moduleEnv,
     JitSpewCont(JitSpew_Codegen, "\n");
   }
 
-  masm.finish(/* dataIsExec */ true);
+  masm.finish();
   if (masm.oom()) {
     return false;
   }

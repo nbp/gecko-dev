@@ -7528,6 +7528,17 @@
   mirror: always  # LoadStartupJSPrefs
   do_not_use_directly: true
 
+# Whether to allocate a JIT data section separated from the JIT code section.
+#
+# Unless you have specific CPU features which permits it, such AAPR register on
+# ARM64 and MPK on x86_64, this defaults to using mprotect which will introduce
+# extra slow-down.
+- name: javascript.options.use_jit_data_section
+  type: bool
+  value: true
+  mirror: always  # LoadStartupJSPrefs
+  do_not_use_directly: true
+
 # Jit Hints Cache - An in-process cache for the
 # content process to accelerate repeated baseline
 # compilations

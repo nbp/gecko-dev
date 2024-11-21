@@ -1996,7 +1996,7 @@ bool wasm::EnsureBuiltinThunksInitialized() {
   jitContext.setIsCompilingWasm(oldFlag);
 #endif
 
-  masm.finish(/* dataIsExec */ true);
+  masm.finish();
   if (masm.oom()) {
     return false;
   }

@@ -859,6 +859,9 @@ static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
   if (safeMode) {
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_ENABLE, false);
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_ENABLE, false);
+    // TODO: This is a new feature, but we might want to set this on by default,
+    // to keep the user safe.
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_USE_JIT_DATA_SECTION, false);
     JS_SetGlobalJitCompilerOption(
         cx, JSJITCOMPILER_JIT_TRUSTEDPRINCIPALS_ENABLE, false);
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_NATIVE_REGEXP_ENABLE,
@@ -872,6 +875,9 @@ static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
     JS_SetGlobalJitCompilerOption(
         cx, JSJITCOMPILER_ION_ENABLE,
         StaticPrefs::javascript_options_ion_DoNotUseDirectly());
+    JS_SetGlobalJitCompilerOption(
+        cx, JSJITCOMPILER_USE_JIT_DATA_SECTION,
+        StaticPrefs::javascript_options_use_jit_data_section_DoNotUseDirectly());
     JS_SetGlobalJitCompilerOption(cx,
                                   JSJITCOMPILER_JIT_TRUSTEDPRINCIPALS_ENABLE,
                                   useJitForTrustedPrincipals);
