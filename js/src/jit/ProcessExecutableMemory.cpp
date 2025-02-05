@@ -590,7 +590,8 @@ static unsigned ProtectionSettingToFlags(ProtectionSetting protection) {
   }
 #    if !defined(JS_USE_APPLE_FAST_WX)
   unsigned flags = ProtectionSettingToFlags(protection);
-  if (mprotect(addr, bytes, flags)) {
+  int pkey = jitMemory.memoryProtectionKey(addr, bytes);
+  if (pkey_mprotect(addr, bytes, flags, pkey)) {
     return false;
   }
 #    endif
@@ -613,7 +614,8 @@ static void DecommitPages(void* addr, size_t bytes) {
 #  if defined(XP_DARWIN)
   int ret;
 #    if !defined(JS_USE_APPLE_FAST_WX)
-  ret = mprotect(addr, bytes, PROT_NONE);
+  int pkey = jitMemory.memoryProtectionKey(addr, bytes);
+  ret = pkey_mprotect(addr, bytes, PROT_NONE, pkey);
   MOZ_RELEASE_ASSERT(ret == 0);
 #    endif
   do {
@@ -738,6 +740,10 @@ class ProcessJitMemory {
   // Set of data pages which are already allocated.
   PageBitSet<MaxDataPages> roPages_;
 
+  // Memory protection key used to toggle on/off the read & write access to
+  // executable pages on a single thread.
+  int execKey_;
+
  public:
   ProcessJitMemory()
       : base_(nullptr),
@@ -747,7 +753,8 @@ class ProcessJitMemory {
         xCursor_(0),
         roCursor_(0),
         xPages_(),
-        roPages_() {}
+        roPages_(),
+        execKey_(-1) {}
 
   [[nodiscard]] bool init() {
     xPages_.init();
@@ -764,6 +771,10 @@ class ProcessJitMemory {
     }
 
     base_ = static_cast<uint8_t*>(p);
+
+    // Return -1 in case of error, such as non-supported hardware or all 15 keys
+    // have been allocated. Using -1 value is safe as argument of pkey_mprotect.
+    execKey_ = pkey_alloc(0, 0); // PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE
 
     mozilla::Array<uint64_t, 2> seed;
     GenerateXorShift128PlusSeed(seed);
@@ -842,6 +853,17 @@ class ProcessJitMemory {
                  MemCheckKind checkKind);
   // "Free" some data allocations.
   void roDeallocate(void* addr, size_t bytes, bool decommit);
+
+  // Return the memory protection key associated with the pointer, or -1 if none
+  // were allocated.
+  int memoryProtectionKey(void* p, size_t bytes) const {
+    if (containsCodeAddressRange(p, bytes)) {
+      return execKey_;
+    }
+    MOZ_RELEASE_ASSERT(containsDataAddressRange(p, bytes));
+    return -1;
+  }
+
 };
 
 void* ProcessJitMemory::xAllocate(size_t bytes, ProtectionSetting protection,
@@ -1183,7 +1205,8 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
   }
 #  else
   volatile unsigned flags = ProtectionSettingToFlags(protection);
-  if (mprotect(pageStart, size, flags)) {
+  int pkey = jitMemory.memoryProtectionKey(pageStart, size);
+  if (pkey_mprotect(pageStart, size, flags, pkey)) {
     return false;
   }
 #  endif
