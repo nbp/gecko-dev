@@ -45,7 +45,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
  public:
   // Entry point used in the generated code, it corresponds to the
-  // aligned(Executable.xStart + sizeof(JitCodeHeader)
+  // aligned(Executable.xStart + sizeof(JitCodeHeader))
   uint8_t* raw() const { return headerPtr(); }
 
  protected:
@@ -77,10 +77,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   }
 
   uint32_t dataOffset() const {
-    if (executable_.desc.roSize) {
-      return 0;
-    }
-    return insnSize_;
+    return 0;
   }
   uint32_t jumpRelocTableOffset() const { return dataOffset(); }
   uint32_t dataRelocTableOffset() const {
@@ -98,7 +95,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
     if (executable_.desc.roSize) {
       return (uint8_t*) executable_.roStart;
     }
-    return (uint8_t*) executable_.xStart + insnSize_;
+    return rawEnd();
   }
   uint8_t* jumpRelocTable() const { return &dataRaw()[jumpRelocTableOffset()]; }
   uint8_t* dataRelocTable() const { return &dataRaw()[dataRelocTableOffset()]; }
