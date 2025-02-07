@@ -53,6 +53,8 @@
 using namespace js;
 using namespace js::jit;
 
+static int GetPkey(void* addr, size_t size);
+
 #ifdef XP_WIN
 #  if defined(HAVE_64BIT_BUILD)
 #    define NEED_JIT_UNWIND_HANDLING
@@ -371,8 +373,8 @@ static void DeallocateProcessJitMemory(void* addr, size_t xBytes,
   VirtualFree(addr, 0, MEM_RELEASE);
 }
 
-static DWORD ProtectionSettingToFlags(ProtectionSetting protection) {
-  if (!JitOptions.writeProtectCode) {
+static DWORD ProtectionSettingToFlags(ProtectionSetting protection, int pkey) {
+  if (!JitOptions.writeProtectCode || pkey != -1) {
     return PAGE_EXECUTE_READWRITE;
   }
   switch (protection) {
@@ -388,8 +390,9 @@ static DWORD ProtectionSettingToFlags(ProtectionSetting protection) {
 
 [[nodiscard]] static bool CommitPages(void* addr, size_t bytes,
                                       ProtectionSetting protection) {
+  int pkey = GetPkey(addr, bytes);
   void* p = VirtualAlloc(addr, bytes, MEM_COMMIT,
-                         ProtectionSettingToFlags(protection));
+                         ProtectionSettingToFlags(protection, pkey));
   if (!p) {
     return false;
   }
@@ -543,8 +546,8 @@ static void DeallocateProcessJitMemory(void* addr, size_t xBytes,
   MOZ_ASSERT(!result || errno == ENOMEM);
 }
 
-static unsigned ProtectionSettingToFlags(ProtectionSetting protection) {
-  if (!JitOptions.writeProtectCode) {
+static unsigned ProtectionSettingToFlags(ProtectionSetting protection, int pkey) {
+  if (!JitOptions.writeProtectCode || pkey != -1) {
     return PROT_READ | PROT_WRITE | PROT_EXEC;
   }
 #  ifdef MOZ_VALGRIND
@@ -580,6 +583,7 @@ static unsigned ProtectionSettingToFlags(ProtectionSetting protection) {
 [[nodiscard]] static bool CommitPages(void* addr, size_t bytes,
                                       ProtectionSetting protection) {
   // See the comment in ReserveProcessJitMemory.
+  int pkey = GetPkey(addr, bytes);
 #  if defined(XP_DARWIN)
   int ret;
   do {
@@ -589,15 +593,14 @@ static unsigned ProtectionSettingToFlags(ProtectionSetting protection) {
     return false;
   }
 #    if !defined(JS_USE_APPLE_FAST_WX)
-  unsigned flags = ProtectionSettingToFlags(protection);
-  int pkey = jitMemory.memoryProtectionKey(addr, bytes);
+  unsigned flags = ProtectionSettingToFlags(protection, pkey);
   if (pkey_mprotect(addr, bytes, flags, pkey)) {
     return false;
   }
 #    endif
   return true;
 #  else
-  unsigned flags = ProtectionSettingToFlags(protection);
+  unsigned flags = ProtectionSettingToFlags(protection, pkey);
   void* p = MozTaggedAnonymousMmap(addr, bytes, flags,
                                    MAP_FIXED | MAP_PRIVATE | MAP_ANON, -1, 0,
                                    "js-executable-memory");
@@ -605,6 +608,10 @@ static unsigned ProtectionSettingToFlags(ProtectionSetting protection) {
     return false;
   }
   MOZ_RELEASE_ASSERT(p == addr);
+  // Assign the pkey to the committed pages.
+  if (pkey != -1 && pkey_mprotect(addr, bytes, flags, pkey)) {
+    return false;
+  }
   return true;
 #  endif
 }
@@ -614,7 +621,7 @@ static void DecommitPages(void* addr, size_t bytes) {
 #  if defined(XP_DARWIN)
   int ret;
 #    if !defined(JS_USE_APPLE_FAST_WX)
-  int pkey = jitMemory.memoryProtectionKey(addr, bytes);
+  int pkey = GetPkey(addr, bytes);
   ret = pkey_mprotect(addr, bytes, PROT_NONE, pkey);
   MOZ_RELEASE_ASSERT(ret == 0);
 #    endif
@@ -772,9 +779,13 @@ class ProcessJitMemory {
 
     base_ = static_cast<uint8_t*>(p);
 
+    // TODO: only made to work on Linux x86_64 at the moment.
+    //
     // Return -1 in case of error, such as non-supported hardware or all 15 keys
     // have been allocated. Using -1 value is safe as argument of pkey_mprotect.
-    execKey_ = pkey_alloc(0, 0); // PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE
+    //
+    // CommitPages will set the pkey to the desired pages.
+    execKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
 
     mozilla::Array<uint64_t, 2> seed;
     GenerateXorShift128PlusSeed(seed);
@@ -863,8 +874,23 @@ class ProcessJitMemory {
     MOZ_RELEASE_ASSERT(containsDataAddressRange(p, bytes));
     return -1;
   }
-
+  static int ThreadProtection(ProtectionSetting protection) {
+    switch (protection) {
+      case ProtectionSetting::ReadOnly:
+        return PKEY_DISABLE_WRITE;
+      case ProtectionSetting::Writable:
+        return 0;
+      case ProtectionSetting::Executable:
+        return PKEY_DISABLE_WRITE | PKEY_DISABLE_ACCESS;
+    }
+  }
 };
+
+static ProcessJitMemory jitMemory;
+
+static int GetPkey(void* addr, size_t size) {
+  return jitMemory.memoryProtectionKey(addr, size);
+}
 
 void* ProcessJitMemory::xAllocate(size_t bytes, ProtectionSetting protection,
                                   MemCheckKind checkKind) {
@@ -1088,8 +1114,6 @@ void ProcessJitMemory::roDeallocate(void* addr, size_t bytes, bool decommit) {
   }
 }
 
-static ProcessJitMemory jitMemory;
-
 void* js::jit::AllocateExecutableMemory(size_t bytes,
                                         ProtectionSetting protection,
                                         MemCheckKind checkKind) {
@@ -1178,7 +1202,8 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
 #else
   std::atomic_thread_fence(std::memory_order_seq_cst);
 
-  if (!JitOptions.writeProtectCode) {
+  volatile int pkey = pkey = jitMemory.memoryProtectionKey(pageStart, size);
+  if (pkey == -1 && !JitOptions.writeProtectCode) {
     return true;
   }
 
@@ -1197,22 +1222,37 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
   //
   // TODO: Verify the assembly ...
 #  ifdef XP_WIN
-  volatile DWORD flags = ProtectionSettingToFlags(protection);
+  volatile DWORD flags = ProtectionSettingToFlags(protection, pkey);
   // This is a essentially a VirtualProtect, but with lighter impact on
   // antivirus analysis. See bug 1823634.
   if (!VirtualAlloc(pageStart, size, MEM_COMMIT, flags)) {
     return false;
   }
 #  else
-  volatile unsigned flags = ProtectionSettingToFlags(protection);
-  int pkey = jitMemory.memoryProtectionKey(pageStart, size);
-  if (pkey_mprotect(pageStart, size, flags, pkey)) {
-    return false;
+  volatile unsigned flags = ProtectionSettingToFlags(protection, pkey);
+  volatile int pkr = ProcessJitMemory::ThreadProtection(protection);
+  if (pkey == -1) {
+    if (pkey_mprotect(pageStart, size, flags, pkey)) {
+      return false;
+    }
+  } else {
+    // Modify user-accessible register (PKRU), without syscalls.
+    // This access-right modification is thread-local.
+    pkey_set(pkey, pkr);
+  }
+
+  // This code is repeated in case an attacker would jump above the previous
+  // pkey_mprotect call or above the pkey_set instruction in order to inject
+  // corrupted values.
+  pkey = jitMemory.memoryProtectionKey(pageStart, size);
+  if (pkey != -1) {
+    pkr = ProcessJitMemory::ThreadProtection(protection);
+    MOZ_RELEASE_ASSERT(pkey_get(pkey) == pkr);
   }
 #  endif
 #endif  // __wasi__
 
-  MOZ_RELEASE_ASSERT(flags == ProtectionSettingToFlags(protection));
+  MOZ_RELEASE_ASSERT(flags == ProtectionSettingToFlags(protection, pkey));
   jitMemory.assertValidProtection(pageStart, size, protection);
   return true;
 }
