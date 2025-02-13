@@ -308,16 +308,17 @@ class Assembler : public AssemblerX86Shared {
   // jump table at the bottom of the instruction stream, and if a jump
   // overflows its range, it will redirect here.
   //
-  // Each entry in this table is a jmp [rip], followed by a ud2 to hint to the
-  // hardware branch predictor that there is no fallthrough, followed by the
-  // eight bytes containing an immediate address. This comes out to 16 bytes.
-  //    +1 byte for opcode
-  //    +1 byte for mod r/m
-  //    +4 bytes for rip-relative offset (2)
-  //    +2 bytes for ud2 instruction
-  //    +8 bytes for 64-bit address
+  // Each entry in this table is a jmp followed by a ud2 to hint to the hardware
+  // branch predictor that there is no fallthrough. The address is encoded in a
+  // movabs instruction with an eight bytes immediate address. This comes out to
+  // 16 bytes.
   //
-  static const uint32_t SizeOfExtendedJump = 1 + 1 + 4 + 2 + 8;
+  //    49 bb 00 00 00 00 00 00 00 00   movabs %r11, 0x0000000000000000
+  //    49 ff e3                        jmp %r11
+  //    0f 0b                           ud2
+  //    e5                              hlt
+  //
+  static const uint32_t OffsetInJumpTableEntry = 10;
   static const uint32_t SizeOfJumpTableEntry = 16;
 
   // Two kinds of jumps on x64:

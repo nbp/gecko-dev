@@ -151,7 +151,7 @@ void Assembler::finish() {
   }
 
   // Emit the jump table.
-  masm.haltingAlign(SizeOfJumpTableEntry);
+  masm.haltingAlign(16);
   extendedJumpTable_ = masm.size();
 
   // Zero the extended jumps table.
@@ -160,14 +160,15 @@ void Assembler::finish() {
     size_t oldSize = masm.size();
 #endif
     MOZ_ASSERT(hasCreator());
-    masm.jmp_rip(2);
-    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 6);
-    // Following an indirect branch with ud2 hints to the hardware that
-    // there's no fall-through. This also aligns the 64-bit immediate.
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 0);
+    movWithPatch(ImmWord(0), ScratchReg);
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 2 + 8);
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == OffsetInJumpTableEntry);
+    jmp(Operand(ScratchReg));
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 13);
     masm.ud2();
-    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 8);
-    masm.immediate64(0);
-    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == SizeOfExtendedJump);
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 15);
+    masm.haltingAlign(16);
     MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == SizeOfJumpTableEntry);
   }
 }
@@ -203,7 +204,7 @@ void Assembler::executableCopy(uint8_t* buffer) {
 
       // Now patch the pointer, note that we need to align it to
       // *after* the extended jump, i.e. after the 64-bit immedate.
-      X86Encoding::SetPointer(entry + SizeOfExtendedJump, rp.target);
+      X86Encoding::SetPointer(entry + OffsetInJumpTableEntry, rp.target);
     }
   }
 }
