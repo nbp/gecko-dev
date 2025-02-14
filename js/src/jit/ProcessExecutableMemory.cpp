@@ -876,6 +876,7 @@ class ProcessJitMemory {
   }
   static int ThreadProtection(ProtectionSetting protection) {
     switch (protection) {
+      default:
       case ProtectionSetting::ReadOnly:
         return PKEY_DISABLE_WRITE;
       case ProtectionSetting::Writable:
@@ -1202,7 +1203,7 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
 #else
   std::atomic_thread_fence(std::memory_order_seq_cst);
 
-  volatile int pkey = pkey = jitMemory.memoryProtectionKey(pageStart, size);
+  volatile int pkey = jitMemory.memoryProtectionKey(pageStart, size);
   if (pkey == -1 && !JitOptions.writeProtectCode) {
     return true;
   }
