@@ -2049,6 +2049,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
                  x86_shared);
 
   // Create an unconditional branch to the address given as argument.
+  inline void branchToComputedAddress(Register address) DEFINED_ON(x64);
   inline void branchToComputedAddress(const BaseIndex& address) PER_ARCH;
 
  private:
