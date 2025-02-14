@@ -37,7 +37,7 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
   }
 
   // ExecutableAllocator requires execNeeded to be aligned.
-  execNeeded += sizeof(JitCodeHeader);
+  execNeeded += JitCodeHeaderSize;
   execNeeded += (CodeAlignment - ExecutableAllocatorAlignment);
   if (execNeeded >= MAX_BUFFER_SIZE || dataNeeded >= MAX_BUFFER_SIZE) {
     return fail(cx);
@@ -61,7 +61,7 @@ JitCode* Linker::newCode(JSContext* cx, CodeKind kind) {
 
   // The JitCodeHeader will be stored right before the code buffer.
   uint8_t* execStart = (uint8_t*) result.xStart;
-  uint8_t* codeStart = execStart + sizeof(JitCodeHeader);
+  uint8_t* codeStart = execStart + JitCodeHeaderSize;
 
   // Bump the code up to a nice alignment.
   codeStart = (uint8_t*)AlignBytes((uintptr_t)codeStart, CodeAlignment);

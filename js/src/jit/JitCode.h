@@ -26,17 +26,15 @@ namespace jit {
 class JitCode;
 class MacroAssembler;
 
-// Header at start of raw code buffer
-struct JitCodeHeader {
-  // Link back to corresponding gcthing
-  JitCode* jitCode_;
+// All JitCode allocation are prefixed by a tiny function which only goal is to
+// return the JitCode pointer for the class which is referencing the JitCode.
+// This is necessary to keep the generated code alive while there are any
+// reference live on the stack.
+using GetJitCode = JitCode* (*)();
 
-  void init(JitCode* jitCode);
-
-  static JitCodeHeader* FromExecutable(uint8_t* buffer) {
-    return (JitCodeHeader*)(buffer - sizeof(JitCodeHeader));
-  }
-};
+// Size of the code which is generated at the beginning of the JitCode
+// Executable pages.
+const size_t JitCodeHeaderSize = 16;
 
 class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   friend class gc::CellAllocator;
@@ -44,9 +42,17 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   friend class AutoWritableJitCodeFallible;
 
  public:
+  // TODO: Use a different type to distinguish between a pointer which is meant
+  // to be jumped to and a pointer which is meant to compute something with.
+  //
   // Entry point used in the generated code, it corresponds to the
   // aligned(Executable.xStart + sizeof(JitCodeHeader))
   uint8_t* raw() const { return headerPtr(); }
+
+  // The executable is allocated and aligned, the headerSize can be larger than
+  // JitCodeHeaderSize, and the header should be at an offset from the code
+  // entry point. (see FromExecutable)
+  uint8_t* header() const { return raw() - JitCodeHeaderSize; }
 
  protected:
   Executable executable_;  // Allocation
@@ -140,9 +146,15 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
 
   void copyFrom(MacroAssembler& masm);
 
-  static JitCode* FromExecutable(uint8_t* buffer) {
-    JitCode* code = JitCodeHeader::FromExecutable(buffer)->jitCode_;
-    MOZ_ASSERT(code->raw() == buffer);
+  static JitCode* FromExecutable(uint8_t* entry) {
+    // The JitCode pointer associated with this entry point is stored in the
+    // early bits of the executable code. At an offset ahead which let us encode
+    // enough instruction to encode the code pointer, and which can be returned
+    // once called.
+    uint8_t* fetchJitCode = entry - JitCodeHeaderSize;
+    GetJitCode fetch = reinterpret_cast<GetJitCode>(fetchJitCode);
+    JitCode* code = fetch();
+    MOZ_RELEASE_ASSERT(code->raw() == entry);
     return code;
   }
 

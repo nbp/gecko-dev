@@ -584,13 +584,6 @@ void JitZone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
   *cacheIRStubs += stubSpace_.sizeOfExcludingThis(mallocSizeOf);
 }
 
-void JitCodeHeader::init(JitCode* jitCode) {
-  // As long as JitCode isn't moveable, we can avoid tracing this and
-  // mutating executable data.
-  MOZ_ASSERT(!gc::IsMovableKind(gc::AllocKind::JITCODE));
-  jitCode_ = jitCode;
-}
-
 template <AllowGC allowGC>
 JitCode* JitCode::New(JSContext* cx, Executable&& exec, uint32_t headerSize) {
   JitCode* codeObj =
@@ -614,9 +607,24 @@ template JitCode* JitCode::New<NoGC>(JSContext* cx, Executable&& exec,
                                      uint32_t headerSize);
 
 void JitCode::copyFrom(MacroAssembler& masm) {
+  // As long as JitCode isn't moveable, we can avoid tracing this and
+  // mutating executable data.
+  MOZ_ASSERT(!gc::IsMovableKind(gc::AllocKind::JITCODE));
+
+  // TODO: We should load this pointer from the data-section instead?
+  //
+  // TODO: Seriously, we have an assembler, we should generate this code...
+  //
   // Store the JitCode pointer in the JitCodeHeader so we can recover the
   // gcthing from relocation tables.
-  JitCodeHeader::FromExecutable(raw())->init(this);
+  uint8_t headerContent[JitCodeHeaderSize] = {
+    0x48, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // mov <imm64>, $rax
+    0xC3,                                                        // ret
+    0xE5, 0xE5, 0xE5, 0xE5, 0xE5                                 // in (Illegal x5)
+  };
+  JitCode* self = this;
+  memcpy(&headerContent[2], reinterpret_cast<uint8_t*>(&self), 8);
+  memcpy(header(), &headerContent, JitCodeHeaderSize);
 
   // Copy data and patch the code.
   MOZ_ASSERT(executable_.desc.roSize >= masm.jumpRelocationTableBytes() +
