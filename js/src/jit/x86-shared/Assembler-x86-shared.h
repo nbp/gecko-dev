@@ -288,7 +288,9 @@ class AssemblerX86Shared : public AssemblerShared {
 
   CompactBufferWriter jumpRelocations_;
   CompactBufferWriter dataRelocations_;
+
   Vector<std::pair<CodeOffset, ImmGCPtr>, 8, SystemAllocPolicy> dataGCSection_;
+  Vector<JitCode*, 8, SystemAllocPolicy> dataJitSection_;
   Vector<std::pair<CodeOffset, Value>, 8, SystemAllocPolicy> dataValueSection_;
 
   void writeDataSection(CodeOffset offset, ImmGCPtr ptr) {
@@ -296,6 +298,12 @@ class AssemblerX86Shared : public AssemblerShared {
       embedsNurseryPointers_ = true;
     }
     if (!dataGCSection_.append(std::pair(offset, ptr))) {
+      enoughMemory_ = false;
+    }
+  }
+
+  void writeDataSection(JitCode* code) {
+    if (!dataJitSection_.append(code)) {
       enoughMemory_ = false;
     }
   }

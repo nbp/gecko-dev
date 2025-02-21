@@ -47,6 +47,10 @@ void AssemblerX86Shared::copyDataSection(uint8_t* dest) {
     *reinterpret_cast<const gc::Cell**>(&dest[index]) = dataGCSection_[i].second.value;
     index += sizeof(gc::Cell*);
   }
+  for (size_t i = 0; i < dataJitSection_.length(); i++) {
+    *reinterpret_cast<JitCode**>(&dest[index]) = dataJitSection_[i];
+    index += sizeof(JitCode*);
+  }
   for (size_t i = 0; i < dataValueSection_.length(); i++) {
     *reinterpret_cast<Value*>(&dest[index]) = dataValueSection_[i].second;
     index += sizeof(Value);
@@ -148,6 +152,12 @@ void AssemblerX86Shared::processDataLabels(uint8_t* rawCode, JitCode* code) {
     index += sizeof(gc::Cell*);
   }
   dataGCSection_.clear();
+  // No need for patching pointers for JitCode entry points as they are baked in.
+  //
+  // TODO: However, we should make sure that calls should be part of on the Jit
+  // code which can be referenced from else-where. Otherwise calls would leak
+  // executable code pointers.
+  dataJitSection_.clear();
   for (size_t i = 0; i < dataValueSection_.length(); i++) {
     intptr_t offset = dataValueSection_[i].first.offset();
     X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);

@@ -111,13 +111,16 @@ ABIArg ABIArgGenerator::next(MIRType type) {
 }
 
 void Assembler::addPendingJump(JmpSrc src, ImmPtr target,
-                               RelocationKind reloc) {
+                               RelocationKind reloc, JitCode* code) {
   MOZ_ASSERT(target.value != nullptr);
 
   // Emit reloc before modifying the jump table, since it computes a 0-based
   // index. This jump is not patchable at runtime.
   if (reloc == RelocationKind::JITCODE) {
-    jumpRelocations_.writeUnsigned(src.offset());
+    // jumpRelocations_.writeUnsigned(src.offset());
+    MOZ_ASSERT(code);
+    MOZ_ASSERT(code->raw() == target.value);
+    writeDataSection(code);
   }
 
   static_assert(MaxCodeBytesPerProcess <= uint64_t(2) * 1024 * 1024 * 1024,

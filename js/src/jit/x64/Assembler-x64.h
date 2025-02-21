@@ -339,7 +339,7 @@ class Assembler : public AssemblerX86Shared {
   static JitCode* CodeFromJump(JitCode* code, uint8_t* jump);
 
  private:
-  void addPendingJump(JmpSrc src, ImmPtr target, RelocationKind reloc);
+  void addPendingJump(JmpSrc src, ImmPtr target, RelocationKind reloc, JitCode* code = nullptr);
 
  public:
   using AssemblerX86Shared::j;
@@ -1148,26 +1148,26 @@ class Assembler : public AssemblerX86Shared {
     }
   }
 
-  void jmp(ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED) {
+  void jmp(ImmPtr target, RelocationKind reloc = RelocationKind::HARDCODED, JitCode* code = nullptr) {
     MOZ_ASSERT(hasCreator());
     JmpSrc src = masm.jmp();
-    addPendingJump(src, target, reloc);
+    addPendingJump(src, target, reloc, code);
   }
   void j(Condition cond, ImmPtr target,
-         RelocationKind reloc = RelocationKind::HARDCODED) {
+         RelocationKind reloc = RelocationKind::HARDCODED, JitCode* code = nullptr) {
     JmpSrc src = masm.jCC(static_cast<X86Encoding::Condition>(cond));
-    addPendingJump(src, target, reloc);
+    addPendingJump(src, target, reloc, code);
   }
 
   void jmp(JitCode* target) {
-    jmp(ImmPtr(target->raw()), RelocationKind::JITCODE);
+    jmp(ImmPtr(target->raw()), RelocationKind::JITCODE, target);
   }
   void j(Condition cond, JitCode* target) {
-    j(cond, ImmPtr(target->raw()), RelocationKind::JITCODE);
+    j(cond, ImmPtr(target->raw()), RelocationKind::JITCODE, target);
   }
   void call(JitCode* target) {
     JmpSrc src = masm.call();
-    addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
+    addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE, target);
   }
   void call(ImmWord target) { call(ImmPtr((void*)target.value)); }
   void call(ImmPtr target) {
@@ -1180,7 +1180,7 @@ class Assembler : public AssemblerX86Shared {
   CodeOffset toggledCall(JitCode* target, bool enabled) {
     CodeOffset offset(size());
     JmpSrc src = enabled ? masm.call() : masm.cmp_eax();
-    addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE);
+    addPendingJump(src, ImmPtr(target->raw()), RelocationKind::JITCODE, target);
     MOZ_ASSERT_IF(!oom(), size() - offset.offset() == ToggledCallSize(nullptr));
     return offset;
   }
