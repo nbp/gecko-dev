@@ -91,6 +91,18 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   /////////////////////////////////////////////////////////////////
   // X64 helpers.
   /////////////////////////////////////////////////////////////////
+  void writeDataSection(CodeOffset offset, const Value& val) {
+    if (val.isGCThing()) {
+      gc::Cell* cell = val.toGCThing();
+      if (cell && gc::IsInsideNursery(cell)) {
+        embedsNurseryPointers_ = true;
+      }
+    }
+    if (!dataValueSection_.append(std::pair(offset, val))) {
+      enoughMemory_ = false;
+    }
+  }
+
   void writeDataRelocation(const Value& val) {
     // Raw GC pointer relocations and Value relocations both end up in
     // Assembler::TraceDataRelocations.
@@ -159,8 +171,20 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void storeValue(const Value& val, const T& dest) {
     ScratchRegisterScope scratch(asMasm());
     if (val.isGCThing()) {
+#if 1
+      // GC Pointers are moved to the data section.
+      masm.movq_i64r(0x0124, scratch.encoding());
+      auto offset = CodeOffset(masm.currentOffset());
+      // TODO: This can be merged in the previous instruction if we were to ensure
+      // that MaxCodeBytesPerProcess + MaxDataBytesPerProcess < INT32_MAX. On the
+      // other hand this implies reducing even more the amount of space dedicated
+      // to JIT code.
+      masm.movq_mr(0, scratch.encoding(), scratch.encoding());
+      writeDataSection(offset, val);
+#else
       movWithPatch(ImmWord(val.asRawBits()), scratch);
       writeDataRelocation(val);
+#endif
     } else {
       mov(ImmWord(val.asRawBits()), scratch);
     }
@@ -203,8 +227,20 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void pushValue(const Value& val) {
     if (val.isGCThing()) {
       ScratchRegisterScope scratch(asMasm());
+#if 1
+      // GC Pointers are moved to the data section.
+      masm.movq_i64r(0x0125, scratch.encoding());
+      auto offset = CodeOffset(masm.currentOffset());
+      // TODO: This can be merged in the previous instruction if we were to ensure
+      // that MaxCodeBytesPerProcess + MaxDataBytesPerProcess < INT32_MAX. On the
+      // other hand this implies reducing even more the amount of space dedicated
+      // to JIT code.
+      masm.movq_mr(0, scratch.encoding(), scratch.encoding());
+      writeDataSection(offset, val);
+#else
       movWithPatch(ImmWord(val.asRawBits()), scratch);
       writeDataRelocation(val);
+#endif
       push(scratch);
     } else {
       push(ImmWord(val.asRawBits()));

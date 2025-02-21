@@ -878,8 +878,20 @@ void MacroAssembler::moveValue(const ValueOperand& src,
 }
 
 void MacroAssembler::moveValue(const Value& src, const ValueOperand& dest) {
+#if 1
+  // GC Pointers are moved to the data section.
+  masm.movq_i64r(0x0123, dest.valueReg().encoding());
+  auto offset = CodeOffset(masm.currentOffset());
+  // TODO: This can be merged in the previous instruction if we were to ensure
+  // that MaxCodeBytesPerProcess + MaxDataBytesPerProcess < INT32_MAX. On the
+  // other hand this implies reducing even more the amount of space dedicated
+  // to JIT code.
+  masm.movq_mr(0, dest.valueReg().encoding(), dest.valueReg().encoding());
+  writeDataSection(offset, src);
+#else
   movWithPatch(ImmWord(src.asRawBits()), dest.valueReg());
   writeDataRelocation(src);
+#endif
 }
 
 // ===============================================================

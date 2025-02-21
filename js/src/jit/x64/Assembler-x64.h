@@ -442,8 +442,20 @@ class Assembler : public AssemblerX86Shared {
     movq(ImmWord(uintptr_t(imm.value)), dest);
   }
   void movq(ImmGCPtr ptr, Register dest) {
+#if 1
+    // GC Pointers are moved to the data section.
+    masm.movq_i64r(0x0123, dest.encoding());
+    auto offset = CodeOffset(masm.currentOffset());
+    // TODO: This can be merged in the previous instruction if we were to ensure
+    // that MaxCodeBytesPerProcess + MaxDataBytesPerProcess < INT32_MAX. On the
+    // other hand this implies reducing even more the amount of space dedicated
+    // to JIT code.
+    masm.movq_mr(0, dest.encoding(), dest.encoding());
+    writeDataSection(offset, ptr);
+#else
     masm.movq_i64r(uintptr_t(ptr.value), dest.encoding());
     writeDataRelocation(ptr);
+#endif
   }
   void movq(const Operand& src, Register dest) {
     switch (src.kind()) {

@@ -59,6 +59,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint32_t insnSize_;    // Instruction stream size.
   uint32_t jumpRelocTableBytes_;  // Size of the jump relocation table.
   uint32_t dataRelocTableBytes_;  // Size of the data relocation table.
+  uint32_t dataSectionBytes_;     // Size of the data section.
   uint32_t constantsTableBytes_;  // Size of the data relocation table.
   uint8_t headerSize_ : 5;        // Number of bytes allocated before codeStart.
   bool invalidated_ : 1;     // Whether the code object has been invalidated.
@@ -74,6 +75,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
         insnSize_(0),
         jumpRelocTableBytes_(0),
         dataRelocTableBytes_(0),
+        dataSectionBytes_(0),
         constantsTableBytes_(0),
         headerSize_(headerSize),
         invalidated_(false),
@@ -89,14 +91,21 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   uint32_t dataRelocTableOffset() const {
     return jumpRelocTableOffset() + jumpRelocTableBytes_;
   }
-  uint32_t constantsTableOffset() const {
+  uint32_t dataSectionOffset() const {
     return dataRelocTableOffset() + dataRelocTableBytes_;
+  }
+  uint32_t constantsTableOffset() const {
+    return dataSectionOffset() + dataSectionBytes_;
   }
   uint32_t dataSize() const {
     return constantsTableOffset() + constantsTableBytes_;
   }
 
  public:
+  size_t dataSectionEntries() const {
+    return dataSectionBytes_ / sizeof(gc::Cell*);
+  }
+
   uint8_t* dataRaw() const {
     if (executable_.desc.roSize) {
       return (uint8_t*) executable_.roStart;
@@ -105,6 +114,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   }
   uint8_t* jumpRelocTable() const { return &dataRaw()[jumpRelocTableOffset()]; }
   uint8_t* dataRelocTable() const { return &dataRaw()[dataRelocTableOffset()]; }
+  uint8_t* dataSection() const { return &dataRaw()[dataSectionOffset()]; }
   uint8_t* constantsTable() const { return &dataRaw()[constantsTableOffset()]; }
   uint8_t* dataRawEnd() const { return dataRaw() + dataSize(); }
 

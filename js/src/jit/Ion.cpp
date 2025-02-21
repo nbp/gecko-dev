@@ -632,10 +632,12 @@ void JitCode::copyFrom(MacroAssembler& masm) {
              masm.constantsTableBytes());
   jumpRelocTableBytes_ = masm.jumpRelocationTableBytes();
   dataRelocTableBytes_ = masm.dataRelocationTableBytes();
+  dataSectionBytes_ = masm.dataSectionBytes();
   constantsTableBytes_ = masm.constantsTableBytes();
 
   masm.copyJumpRelocationTable(jumpRelocTable());
   masm.copyDataRelocationTable(dataRelocTable());
+  masm.copyDataSection(dataSection());
   masm.copyConstantsTable(raw(), constantsTable());
 
   // Copy the code.
@@ -644,6 +646,7 @@ void JitCode::copyFrom(MacroAssembler& masm) {
 
   // Patch the code.
   masm.processCodeLabels(raw());
+  masm.processDataLabels(raw(), this);
 }
 
 void JitCode::traceChildren(JSTracer* trc) {
@@ -662,6 +665,9 @@ void JitCode::traceChildren(JSTracer* trc) {
     uint8_t* start = dataRelocTable();
     CompactBufferReader reader(start, start + dataRelocTableBytes_);
     MacroAssembler::TraceDataRelocations(trc, this, reader);
+  }
+  if (dataSectionBytes_) {
+    MacroAssembler::TraceDataSection(trc, this);
   }
 }
 

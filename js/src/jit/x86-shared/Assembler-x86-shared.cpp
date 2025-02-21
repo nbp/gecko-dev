@@ -39,6 +39,20 @@ void AssemblerX86Shared::copyDataRelocationTable(uint8_t* dest) {
   }
 }
 
+void AssemblerX86Shared::copyDataSection(uint8_t* dest) {
+  // This code is in charge of making a copy of all the GC pointers which are in
+  // the data section. The offset in the code are updated by processDataLabels.
+  size_t index = 0;
+  for (size_t i = 0; i < dataGCSection_.length(); i++) {
+    *reinterpret_cast<const gc::Cell**>(&dest[index]) = dataGCSection_[i].second.value;
+    index += sizeof(gc::Cell*);
+  }
+  for (size_t i = 0; i < dataValueSection_.length(); i++) {
+    *reinterpret_cast<Value*>(&dest[index]) = dataValueSection_[i].second;
+    index += sizeof(Value);
+  }
+}
+
 /* static */
 void AssemblerX86Shared::TraceDataRelocations(JSTracer* trc, JitCode* code,
                                               CompactBufferReader& reader) {
@@ -87,6 +101,33 @@ void AssemblerX86Shared::TraceDataRelocations(JSTracer* trc, JitCode* code,
   }
 }
 
+/* static */
+void AssemblerX86Shared::TraceDataSection(JSTracer* trc, JitCode* code) {
+  uintptr_t* words = reinterpret_cast<uintptr_t*>(code->dataSection());
+#ifdef JS_PUNBOX64
+  Value* values = reinterpret_cast<Value*>(words);
+#endif
+  gc::Cell** cells = reinterpret_cast<gc::Cell**>(words);
+  for (size_t i = 0; i < code->dataSectionEntries(); i++) {
+#ifdef JS_PUNBOX64
+    // Data relocations can be for Values or for raw pointers. If a Value is
+    // zero-tagged, we can trace it as if it were a raw pointer. If a Value
+    // is not zero-tagged, we have to interpret it as a Value to ensure that the
+    // tag bits are masked off to recover the actual pointer.
+
+    if (words[i] >> JSVAL_TAG_SHIFT) {
+      // This relocation is a Value with a non-zero tag.
+      MOZ_ASSERT_IF(values[i].isGCThing(),
+                    gc::IsCellPointerValid(values[i].toGCThing()));
+      TraceManuallyBarrieredEdge(trc, &values[i], "jit-masm-value");
+      continue;
+    }
+#endif
+    MOZ_ASSERT(gc::IsCellPointerValid(cells[i]));
+    TraceManuallyBarrieredGenericPointerEdge(trc, &cells[i], "jit-masm-ptr");
+  }
+}
+
 void AssemblerX86Shared::executableCopy(void* buffer) {
   masm.executableCopy(buffer);
 }
@@ -95,6 +136,24 @@ void AssemblerX86Shared::processCodeLabels(uint8_t* rawCode) {
   for (const CodeLabel& label : codeLabels_) {
     Bind(rawCode, label);
   }
+}
+
+void AssemblerX86Shared::processDataLabels(uint8_t* rawCode, JitCode* code) {
+  // Set the absolute address of each GC::Cell* in the code.
+  uint8_t* dataPtr = code->dataSection();
+  size_t index = 0;
+  for (size_t i = 0; i < dataGCSection_.length(); i++) {
+    intptr_t offset = dataGCSection_[i].first.offset();
+    X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);
+    index += sizeof(gc::Cell*);
+  }
+  dataGCSection_.clear();
+  for (size_t i = 0; i < dataValueSection_.length(); i++) {
+    intptr_t offset = dataValueSection_[i].first.offset();
+    X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);
+    index += sizeof(Value);
+  }
+  dataValueSection_.clear();
 }
 
 AssemblerX86Shared::Condition AssemblerX86Shared::InvertCondition(
