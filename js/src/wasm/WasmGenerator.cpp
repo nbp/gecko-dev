@@ -1171,6 +1171,8 @@ SharedMetadata ModuleGenerator::finishMetadata(const Bytes& bytecode) {
 SharedModule ModuleGenerator::finishModule(
     const ShareableBytes& bytecode,
     JS::OptimizedEncodingListener* maybeTier2Listener) {
+  // TODO: We should look into supporting WASM / Asm.JS
+  _exit(0);
   MOZ_ASSERT(mode() == CompileMode::Once || mode() == CompileMode::Tier1);
 
   UniqueCodeTier codeTier = finishCodeTier();
