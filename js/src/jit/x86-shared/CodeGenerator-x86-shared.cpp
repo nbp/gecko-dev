@@ -1775,6 +1775,8 @@ MoveOperand CodeGeneratorX86Shared::toMoveOperand(LAllocation a) const {
   return MoveOperand(ToAddress(a), kind);
 }
 
+#define USE_TABLE_OF_JUMPS 1
+
 class OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorX86Shared> {
   MTableSwitch* mir_;
   CodeLabel jumpLabel_;
@@ -1799,6 +1801,24 @@ void CodeGeneratorX86Shared::visitOutOfLineTableSwitch(
   masm.bind(ool->jumpLabel());
   masm.addCodeLabel(*ool->jumpLabel());
 
+#if USE_TABLE_OF_JUMPS
+  for (size_t i = 0; i < mir->numCases(); i++) {
+    LBlock* caseblock = skipTrivialBlocks(mir->getCase(i))->lir();
+    Label* caseheader = caseblock->label();
+
+# ifdef DEBUG
+    size_t oldSize = masm.size();
+# endif
+    // 31 bits of negative RIP relative offset should be enough to address all
+    // cases of an Ion compilation.
+    masm.jump(caseheader);
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 5);
+    masm.ud2();
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 7);
+    masm.haltingAlign(8);
+    MOZ_ASSERT_IF(!masm.oom(), masm.size() - oldSize == 8);
+  }
+#else
   for (size_t i = 0; i < mir->numCases(); i++) {
     LBlock* caseblock = skipTrivialBlocks(mir->getCase(i))->lir();
     Label* caseheader = caseblock->label();
@@ -1811,6 +1831,7 @@ void CodeGeneratorX86Shared::visitOutOfLineTableSwitch(
     cl.target()->bind(caseoffset);
     masm.addCodeLabel(cl);
   }
+#endif
 }
 
 void CodeGeneratorX86Shared::emitTableSwitchDispatch(MTableSwitch* mir,
@@ -1834,12 +1855,24 @@ void CodeGeneratorX86Shared::emitTableSwitchDispatch(MTableSwitch* mir,
   OutOfLineTableSwitch* ool = new (alloc()) OutOfLineTableSwitch(mir);
   addOutOfLineCode(ool, mir);
 
+#if USE_TABLE_OF_JUMPS
+  // Compute the position where a pointer to the right case stands.
+  masm.mov(ool->jumpLabel(), base);
+  BaseIndex pointer(base, index, ScalePointer);
+
+  // Compute the address of jump entry.
+  masm.computeEffectiveAddress(pointer, base);
+
+  // Jump to the right case
+  masm.branchToComputedAddress(base);
+#else
   // Compute the position where a pointer to the right case stands.
   masm.mov(ool->jumpLabel(), base);
   BaseIndex pointer(base, index, ScalePointer);
 
   // Jump to the right case
   masm.branchToComputedAddress(pointer);
+#endif
 }
 
 void CodeGenerator::visitMathD(LMathD* math) {
