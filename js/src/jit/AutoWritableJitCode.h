@@ -102,6 +102,49 @@ class MOZ_RAII AutoWritableJitCode : private AutoWritableJitCodeFallible {
   }
 };
 
+class MOZ_RAII AutoWritableJitDataFallible {
+  JitCode* code_;
+
+  JSRuntime* runtime() {
+    return code_->runtimeFromMainThread();
+  }
+
+  void* dataAddr() const { return code_->executable_.roStart; }
+  size_t dataSize() const { return code_->executable_.desc.roSize; }
+
+ public:
+  explicit AutoWritableJitDataFallible(JitCode* code) : code_(code) {
+    runtime()->toggleAutoWritableJitCodeActive(true);
+  }
+
+  [[nodiscard]] bool makeWritable() {
+    if (dataSize() &&
+        !ExecutableAllocator::makeWritable(dataAddr(), dataSize())) {
+      return false;
+    }
+    return true;
+  }
+
+  ~AutoWritableJitDataFallible() {
+    if (dataSize() &&
+        !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
+      MOZ_CRASH();
+    }
+    runtime()->toggleAutoWritableJitCodeActive(false);
+  }
+};
+
+class MOZ_RAII AutoWritableJitData : private AutoWritableJitDataFallible {
+public:
+  explicit AutoWritableJitData(JitCode* code)
+    : AutoWritableJitDataFallible(code) {
+    AutoEnterOOMUnsafeRegion oomUnsafe;
+    if (!makeWritable()) {
+      oomUnsafe.crash("Failed to mmap. Likely no mappings available.");
+    }
+  }
+};
+
 }  // namespace js::jit
 
 #endif /* jit_AutoWritableJitCode_h */

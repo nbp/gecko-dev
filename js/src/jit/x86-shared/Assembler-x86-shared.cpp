@@ -107,6 +107,12 @@ void AssemblerX86Shared::TraceDataRelocations(JSTracer* trc, JitCode* code,
 
 /* static */
 void AssemblerX86Shared::TraceDataSection(JSTracer* trc, JitCode* code) {
+  mozilla::Maybe<AutoWritableJitCode> awjc;
+  if (code->dataSectionEntries()) {
+    // TODO: Maybe do this only when pointers are updated by the GC.
+    awjc.emplace(code);
+  }
+
   uintptr_t* words = reinterpret_cast<uintptr_t*>(code->dataSection());
 #ifdef JS_PUNBOX64
   Value* values = reinterpret_cast<Value*>(words);

@@ -40,6 +40,7 @@ class JitCode : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   friend class gc::CellAllocator;
   // Access Executable class.
   friend class AutoWritableJitCodeFallible;
+  friend class AutoWritableJitDataFallible;
 
  public:
   // TODO: Use a different type to distinguish between a pointer which is meant

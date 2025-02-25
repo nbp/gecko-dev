@@ -748,8 +748,9 @@ class ProcessJitMemory {
   PageBitSet<MaxDataPages> roPages_;
 
   // Memory protection key used to toggle on/off the read & write access to
-  // executable pages on a single thread.
+  // executable/data pages on a single thread.
   int execKey_;
+  int dataKey_;
 
  public:
   ProcessJitMemory()
@@ -761,7 +762,8 @@ class ProcessJitMemory {
         roCursor_(0),
         xPages_(),
         roPages_(),
-        execKey_(-1) {}
+        execKey_(-1),
+        dataKey_(-1) {}
 
   [[nodiscard]] bool init() {
     xPages_.init();
@@ -786,6 +788,7 @@ class ProcessJitMemory {
     //
     // CommitPages will set the pkey to the desired pages.
     execKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
+    dataKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
 
     mozilla::Array<uint64_t, 2> seed;
     GenerateXorShift128PlusSeed(seed);
@@ -872,7 +875,7 @@ class ProcessJitMemory {
       return execKey_;
     }
     MOZ_RELEASE_ASSERT(containsDataAddressRange(p, bytes));
-    return -1;
+    return dataKey_;
   }
   static int ThreadProtection(ProtectionSetting protection) {
     switch (protection) {
