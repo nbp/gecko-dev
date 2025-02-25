@@ -65,10 +65,26 @@ bool JSJitFrameIter::checkInvalidation(IonScript** ionScriptOut) const {
     return false;
   }
 
+  // TODO: For speed we might want to keep a weak-list of ranges on the
+  // JitScript, similar to DependentScriptSet, such that we can have a back
+  // reference to IonScript which are still live on the stack.
+  //
+  // In the mean time we keep the old fashion of patching the JIT code with the
+  // pointer to the return address. NOTE: the range is ok for reading the return
+  // delta stored by InvalidateActivation, but this is incorrect for reading the
+  // epilogue data offset. However, this should work as on PKU architecture a
+  // single pkey is used for all executable code and on other architectures the
+  // pages are readable.
+  if (!ExecutableAllocator::makeWritable(returnAddr - 4, 4)) {
+    MOZ_CRASH();
+  }
   int32_t invalidationDataOffset = ((int32_t*)returnAddr)[-1];
   uint8_t* ionScriptDataOffset = returnAddr + invalidationDataOffset;
   IonScript* ionScript = (IonScript*)Assembler::GetPointer(ionScriptDataOffset);
   MOZ_ASSERT(ionScript->containsReturnAddress(returnAddr));
+  if (!ExecutableAllocator::makeExecutableAndFlushICache(returnAddr - 4, 4)) {
+    MOZ_CRASH();
+  }
   *ionScriptOut = ionScript;
   return true;
 }
