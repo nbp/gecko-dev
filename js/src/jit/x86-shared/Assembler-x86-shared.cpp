@@ -43,6 +43,10 @@ void AssemblerX86Shared::copyDataSection(uint8_t* dest) {
   // This code is in charge of making a copy of all the GC pointers which are in
   // the data section. The offset in the code are updated by processDataLabels.
   size_t index = 0;
+  for (size_t i = 0; i < dataValueSection_.length(); i++) {
+    *reinterpret_cast<Value*>(&dest[index]) = dataValueSection_[i].second;
+    index += sizeof(Value);
+  }
   for (size_t i = 0; i < dataGCSection_.length(); i++) {
     *reinterpret_cast<const gc::Cell**>(&dest[index]) = dataGCSection_[i].second.value;
     index += sizeof(gc::Cell*);
@@ -50,10 +54,6 @@ void AssemblerX86Shared::copyDataSection(uint8_t* dest) {
   for (size_t i = 0; i < dataJitSection_.length(); i++) {
     *reinterpret_cast<JitCode**>(&dest[index]) = dataJitSection_[i];
     index += sizeof(JitCode*);
-  }
-  for (size_t i = 0; i < dataValueSection_.length(); i++) {
-    *reinterpret_cast<Value*>(&dest[index]) = dataValueSection_[i].second;
-    index += sizeof(Value);
   }
 }
 
@@ -152,6 +152,12 @@ void AssemblerX86Shared::processDataLabels(uint8_t* rawCode, JitCode* code) {
   // Set the absolute address of each GC::Cell* in the code.
   uint8_t* dataPtr = code->dataSection();
   size_t index = 0;
+  for (size_t i = 0; i < dataValueSection_.length(); i++) {
+    intptr_t offset = dataValueSection_[i].first.offset();
+    X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);
+    index += sizeof(Value);
+  }
+  dataValueSection_.clear();
   for (size_t i = 0; i < dataGCSection_.length(); i++) {
     intptr_t offset = dataGCSection_[i].first.offset();
     X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);
@@ -163,13 +169,9 @@ void AssemblerX86Shared::processDataLabels(uint8_t* rawCode, JitCode* code) {
   // TODO: However, we should make sure that calls should be part of on the Jit
   // code which can be referenced from else-where. Otherwise calls would leak
   // executable code pointers.
+  //
+  // NOTE: index is not updated here, be careful when adding code after.
   dataJitSection_.clear();
-  for (size_t i = 0; i < dataValueSection_.length(); i++) {
-    intptr_t offset = dataValueSection_[i].first.offset();
-    X86Encoding::SetPointer(rawCode + offset, &dataPtr[index]);
-    index += sizeof(Value);
-  }
-  dataValueSection_.clear();
 }
 
 AssemblerX86Shared::Condition AssemblerX86Shared::InvertCondition(

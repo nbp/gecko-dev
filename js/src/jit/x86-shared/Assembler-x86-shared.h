@@ -475,7 +475,8 @@ class AssemblerX86Shared : public AssemblerShared {
   size_t dataRelocationTableBytes() const { return dataRelocations_.length(); }
   size_t dataSectionBytes() const {
     return dataGCSection_.length() * sizeof(void*) +
-        dataValueSection_.length() * sizeof(Value);
+        dataValueSection_.length() * sizeof(Value) +
+        dataJitSection_.length() * sizeof(JitCode*);
   }
 
   // Size of executable code, in bytes.
