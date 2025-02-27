@@ -444,6 +444,7 @@ with open(mozconfig, "wt") as fh:
     fh.write("ac_add_options --enable-project=js\n")
     fh.write("ac_add_options " + CONFIGURE_ARGS + "\n")
     fh.write("mk_add_options MOZ_OBJDIR=" + quote(OBJDIR) + "\n")
+    fh.write("mk_add_options CXXFLAGS='-mpku'\n")
 
 env["MOZCONFIG"] = mozconfig
 

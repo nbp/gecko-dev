@@ -6,6 +6,11 @@
 
 #include "jit/ProcessExecutableMemory.h"
 
+#if defined __linux__ && !defined _GNU_SOURCE
+/* pkey_mprotect() on Linux requires this via sys/mman.h */
+#define _GNU_SOURCE 1
+#endif
+
 #include "mozilla/Array.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/DebugOnly.h"
@@ -48,6 +53,40 @@
 
 #if defined(XP_IOS)
 #  include <BrowserEngineCore/BEMemory.h>
+#endif
+
+// Just in case we are compiling with an outdated version of the GLIBC...
+#if defined(__GLIBC__) && !defined(PKEY_DISABLE_ACCESS)
+// (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 27))
+#  include <immintrin.h>
+#  include <x86intrin.h>
+
+#  define PKEY_DISABLE_ACCESS (1 << 0)  // Disables read/write access
+#  define PKEY_DISABLE_WRITE (1 << 1)   // Disables write access only
+
+static inline int pkey_mprotect(void* addr, size_t len, int prot, int pkey) {
+    return syscall(329, addr, len, prot, pkey);
+}
+
+static inline int pkey_alloc(unsigned flags, unsigned access_right) {
+  return syscall(330, flags, access);
+}
+
+static inline int pkey_free(int pkey) {
+  return syscall(331, pkey);
+}
+
+static inline void pkey_set(int pkey, int rights) {
+    uint32_t pkru = _rdpkru_u32();
+    pkru &= ~(3 << (2 * pkey));   // Clear previous bits
+    pkru |= (rights << (2 * pkey)); // Set new bits
+    _wrpkru(pkru);
+}
+
+static inline int pkey_get(int pkey) {
+    return (_rdpkru_u32() >> (2 * pkey)) & 3;
+}
+
 #endif
 
 using namespace js;

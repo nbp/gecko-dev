@@ -10,6 +10,9 @@ CXXFLAGS += CONFIG["MOZ_ICU_CFLAGS"]
 if CONFIG["CC_TYPE"] in ("clang", "gcc"):
     # Error on bad printf-like format strings
     CXXFLAGS += ["-Werror=format"]
+    # TODO: Check for x64...
+    # To make use of rdpkru / wrpkru assembly instructions.
+    CXXFLAGS += ["-mpku"]
 
 # gcc is buggy and warns on our attempts to JS_PUBLIC_API our
 # forward-declarations or explicit template instantiations. See
