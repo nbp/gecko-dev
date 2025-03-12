@@ -827,7 +827,7 @@ class ProcessJitMemory {
     //
     // CommitPages will set the pkey to the desired pages.
     execKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
-    dataKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
+    dataKey_ = -1; // pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
 
     mozilla::Array<uint64_t, 2> seed;
     GenerateXorShift128PlusSeed(seed);
@@ -1203,6 +1203,7 @@ bool js::jit::AddressIsInExecutableMemory(const void* p) {
 bool js::jit::ReprotectRegion(void* start, size_t size,
                               ProtectionSetting protection,
                               MustFlushICache flushICache) {
+  MOZ_ASSERT(protection != ProtectionSetting::ReadOnly);
 #if defined(JS_CODEGEN_WASM32)
   return true;
 #endif

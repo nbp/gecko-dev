@@ -585,7 +585,7 @@ void ExecutablePoolAllocator::systemExecRelease(
 }
 
 ReadOnlyPool::Allocation ExecutablePoolAllocator::systemDataAlloc(size_t n) {
-  void* allocation = AllocateReadOnlyMemory(n, ProtectionSetting::ReadOnly,
+  void* allocation = AllocateReadOnlyMemory(n, ProtectionSetting::Writable,
                                             MemCheckKind::MakeNoAccess);
   ReadOnlyPool::Allocation alloc = {reinterpret_cast<char*>(allocation), n};
   return alloc;

@@ -50,15 +50,8 @@ class MOZ_RAII AutoWritableJitCodeFallible {
   }
 
   [[nodiscard]] bool makeWritable() {
-    if (dataSize() &&
-        !ExecutableAllocator::makeWritable(dataAddr(), dataSize())) {
-      return false;
-    }
+    // NOTE: dataAddr remains RW.
     if (!ExecutableAllocator::makeWritable(addr(), size())) {
-      if (dataSize() &&
-          !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
-        MOZ_CRASH();
-      }
       return false;
     }
     return true;
@@ -78,11 +71,8 @@ class MOZ_RAII AutoWritableJitCodeFallible {
       }
     });
 
+    // NOTE: dataAddr remains RW.
     if (!ExecutableAllocator::makeExecutableAndFlushICache(addr(), size())) {
-      MOZ_CRASH();
-    }
-    if (dataSize() &&
-        !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
       MOZ_CRASH();
     }
     runtime()->toggleAutoWritableJitCodeActive(false);
@@ -118,18 +108,12 @@ class MOZ_RAII AutoWritableJitDataFallible {
   }
 
   [[nodiscard]] bool makeWritable() {
-    if (dataSize() &&
-        !ExecutableAllocator::makeWritable(dataAddr(), dataSize())) {
-      return false;
-    }
+    // NOTE: dataAddr remains RW.
     return true;
   }
 
   ~AutoWritableJitDataFallible() {
-    if (dataSize() &&
-        !ExecutableAllocator::makeReadOnly(dataAddr(), dataSize())) {
-      MOZ_CRASH();
-    }
+    // NOTE: dataAddr remains RW.
     runtime()->toggleAutoWritableJitCodeActive(false);
   }
 };
