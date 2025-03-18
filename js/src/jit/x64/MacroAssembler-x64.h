@@ -171,7 +171,8 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void storeValue(const Value& val, const T& dest) {
     ScratchRegisterScope scratch(asMasm());
     if (val.isGCThing()) {
-#if 1
+#define USE_DATA_SECTION_FOR_VALUE 1
+#if USE_DATA_SECTION_FOR_VALUE
       // GC Pointers are moved to the data section.
       masm.movq_i64r(0x0124, scratch.encoding());
       auto offset = CodeOffset(masm.currentOffset());

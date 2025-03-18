@@ -442,7 +442,8 @@ class Assembler : public AssemblerX86Shared {
     movq(ImmWord(uintptr_t(imm.value)), dest);
   }
   void movq(ImmGCPtr ptr, Register dest) {
-#if 1
+#define USE_DATA_SECTION_FOR_GC 1
+#if USE_DATA_SECTION_FOR_GC
     // GC Pointers are moved to the data section.
     masm.movq_i64r(0x0123, dest.encoding());
     auto offset = CodeOffset(masm.currentOffset());
