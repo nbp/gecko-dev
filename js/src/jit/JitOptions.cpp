@@ -312,11 +312,7 @@ DefaultJitOptions::DefaultJitOptions() {
   // Whether the W^X policy is enforced to mark JIT code pages as either
   // writable or executable but never both at the same time. On Apple Silicon
   // this must always be false because we use pthread_jit_write_protect_np.
-#ifdef JS_USE_APPLE_FAST_WX
-  SET_DEFAULT(writeProtectCode, false);
-#else
   SET_DEFAULT(writeProtectCode, true);
-#endif
 
   // This is set to its actual value in InitializeJit.
   SET_DEFAULT(supportsUnalignedAccesses, false);

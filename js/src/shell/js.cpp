@@ -12953,6 +12953,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
     }
   }
 
+  /*
   if (const char* str = op.getStringOption("write-protect-code")) {
     if (strcmp(str, "on") == 0) {
       jit::JitOptions.maybeSetWriteProtectCode(true);
@@ -12962,6 +12963,7 @@ bool SetContextJITOptions(JSContext* cx, const OptionParser& op) {
       return OptionFailure("write-protect-code", str);
     }
   }
+  */
 
   if (const char* str = op.getStringOption("monomorphic-inlining")) {
     if (strcmp(str, "default") == 0) {

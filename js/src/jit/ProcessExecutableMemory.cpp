@@ -413,8 +413,15 @@ static void DeallocateProcessJitMemory(void* addr, size_t xBytes,
 }
 
 static DWORD ProtectionSettingToFlags(ProtectionSetting protection, int pkey) {
-  if (!JitOptions.writeProtectCode || pkey != -1) {
-    return PAGE_EXECUTE_READWRITE;
+  if (!JitOptions.writeProtectCode || pkey == -1) {
+    switch (protection) {
+      case ProtectionSetting::ReadOnly:
+        [[fallthrough]];
+      case ProtectionSetting::Writable:
+        return PAGE_READWRITE;
+      case ProtectionSetting::Executable:
+        return PAGE_EXECUTE_READWRITE;
+    }
   }
   switch (protection) {
     case ProtectionSetting::ReadOnly:
@@ -587,7 +594,15 @@ static void DeallocateProcessJitMemory(void* addr, size_t xBytes,
 
 static unsigned ProtectionSettingToFlags(ProtectionSetting protection, int pkey) {
   if (!JitOptions.writeProtectCode || pkey != -1) {
-    return PROT_READ | PROT_WRITE | PROT_EXEC;
+    switch (protection) {
+      case ProtectionSetting::ReadOnly:
+        return PROT_READ;
+      case ProtectionSetting::Writable:
+        return PROT_READ | PROT_WRITE;
+      case ProtectionSetting::Executable:
+        return PROT_READ | PROT_WRITE | PROT_EXEC;
+    }
+    MOZ_CRASH();
   }
 #  ifdef MOZ_VALGRIND
   // If we're configured for Valgrind and running on it, use a slacker
@@ -826,8 +841,10 @@ class ProcessJitMemory {
     // have been allocated. Using -1 value is safe as argument of pkey_mprotect.
     //
     // CommitPages will set the pkey to the desired pages.
-    execKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
-    dataKey_ = -1; // pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
+    if (JitOptions.writeProtectCode) {
+      execKey_ = pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
+      dataKey_ = -1; // pkey_alloc(0, PKEY_DISABLE_ACCESS | PKEY_DISABLE_WRITE);
+    }
 
     mozilla::Array<uint64_t, 2> seed;
     GenerateXorShift128PlusSeed(seed);
@@ -1247,7 +1264,7 @@ bool js::jit::ReprotectRegion(void* start, size_t size,
   std::atomic_thread_fence(std::memory_order_seq_cst);
 
   volatile int pkey = jitMemory.memoryProtectionKey(pageStart, size);
-  if (pkey == -1 && !JitOptions.writeProtectCode) {
+  if (!JitOptions.writeProtectCode) {
     return true;
   }
 
