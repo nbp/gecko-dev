@@ -69,7 +69,7 @@ static inline int pkey_mprotect(void* addr, size_t len, int prot, int pkey) {
 }
 
 static inline int pkey_alloc(unsigned flags, unsigned access_right) {
-  return syscall(330, flags, access);
+  return syscall(330, flags, access_right);
 }
 
 static inline int pkey_free(int pkey) {
